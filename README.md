@@ -1,6 +1,6 @@
 # mpris-controller
 
-`mpris-controller` is an interface to control an mpris player from an
+`mpris-controller` is an interface to control an mpris player from a
 Universal Control Surface such as the Behringer X-Touch One.
 
 ## Build
