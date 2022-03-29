@@ -16,7 +16,7 @@ impl<IO: midir::MidiIO, C> Default for DirectionalConnection<IO, C> {
 }
 
 impl<IO: midir::MidiIO, C> DirectionalConnection<IO, C> {
-    fn is_connected(&self) -> bool {
+    pub fn is_connected(&self) -> bool {
         matches!(self, Self::Connected(_))
     }
 }

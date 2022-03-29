@@ -116,6 +116,10 @@ impl PortsOut {
         Ok(())
     }
 
+    pub fn is_connected(&self) -> bool {
+        self.midi_conn.is_connected()
+    }
+
     pub fn connect(&mut self, port_name: Arc<str>) -> Result<(), super::Error> {
         let port = self
             .map

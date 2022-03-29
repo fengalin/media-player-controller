@@ -218,8 +218,10 @@ impl<'a> Controller<'a> {
             }
         }
 
-        for msg in msg_list {
-            let _ = self.midi_ports_out.send(&msg);
+        if self.midi_ports_out.is_connected() {
+            for msg in msg_list {
+                let _ = self.midi_ports_out.send(&msg);
+            }
         }
 
         Ok(())
