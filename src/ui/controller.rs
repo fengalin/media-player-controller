@@ -215,7 +215,7 @@ impl<'a> Controller<'a> {
 
         if self.midi_ports_out.is_connected() {
             for msg in msg_list {
-                let _ = self.midi_ports_out.send(msg);
+                let _ = self.midi_ports_out.send(&msg);
             }
         }
 

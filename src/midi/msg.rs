@@ -29,8 +29,10 @@ impl From<&[u8]> for Msg {
     }
 }
 
-impl std::borrow::Borrow<[u8]> for Msg {
-    fn borrow(&self) -> &[u8] {
+impl std::ops::Deref for Msg {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
         self.0.as_ref()
     }
 }

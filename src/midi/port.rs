@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, sync::Arc};
 
 use super::io;
 
@@ -140,8 +140,8 @@ impl PortsOut {
         Ok(())
     }
 
-    pub fn send(&mut self, msg: impl Borrow<[u8]>) -> Result<(), super::Error> {
-        self.midi_conn.send(msg.borrow())
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), super::Error> {
+        self.midi_conn.send(msg)
     }
 
     pub fn disconnect(&mut self) {
