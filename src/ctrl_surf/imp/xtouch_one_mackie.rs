@@ -42,8 +42,6 @@ mod fader {
     use crate::midi::Tag;
     pub const TAG: Tag = Tag::from(0xe0);
 
-    pub const MAX: u16 = 0x3fff;
-    pub const STEP: f64 = 1f64 / MAX as f64;
     pub const TOUCH_THRSD: u8 = 64;
 }
 
@@ -173,7 +171,7 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
 
 impl XTouchOneMackie {
     fn build_fader_msg(&self, vol: f64) -> [u8; 3] {
-        let two_bytes = midi::u16_to_be((fader::MAX as f64 * vol) as u16);
+        let two_bytes = midi::normalized_f64::to_be(vol).unwrap();
         [fader::TAG | self.chan, two_bytes[0], two_bytes[1]]
     }
 
@@ -197,18 +195,16 @@ impl XTouchOneMackie {
         Response::none()
     }
 
-    fn fader_moved(&mut self, value: &[u8]) -> Response {
+    fn fader_moved(&mut self, buf: &[u8]) -> Response {
         use FaderState::*;
 
-        let value = match midi::be_to_u16(value) {
+        let vol = match midi::normalized_f64::from_be(buf) {
             Ok(value) => value,
             Err(err) => {
                 log::error!("Fader moved value: {err}");
                 return Response::none();
             }
         };
-
-        let vol = value.min(fader::MAX) as f64 * fader::STEP;
 
         match &mut self.fader_state {
             Touched { last_volume } => {
@@ -279,12 +275,14 @@ impl XTouchOneMackie {
     }
 
     fn timecode(&mut self, tc: ctrl_surf::Timecode) -> Response {
+        use display_7_seg::*;
+
         let mut list = MsgList::new();
         let tc = TimecodeBreakDown::from(tc);
 
         for (idx, (&last_digit, digit)) in self.last_tc.0.iter().zip(tc.0).enumerate() {
             if last_digit != digit {
-                list.push([0xb0, 0x49 - idx as u8, digit]);
+                list.push([TAG.into(), TIME_LEFT_DIGIT - idx as u8, digit]);
             }
         }
 

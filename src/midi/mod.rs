@@ -47,25 +47,60 @@ impl std::ops::BitOr<Channel> for Tag {
     }
 }
 
-#[inline]
-pub fn be_to_u16(buf: &[u8]) -> Result<u16, Error> {
-    if buf.len() != 2 {
-        return Err(Error::InvalidValue);
+pub mod u14 {
+    use super::{msg, Error};
+
+    pub const MAX: u16 = 0x3fff;
+
+    #[inline]
+    pub fn from_be(buf: &[u8]) -> Result<u16, Error> {
+        if buf.len() != 2 {
+            return Err(Error::InvalidTwoBytesValue(
+                msg::Displayable::from(buf).to_owned(),
+            ));
+        }
+
+        let (lsb, msb) = (buf[0], buf[1]);
+        if lsb > 0x7f || msb > 0x7f {
+            return Err(Error::InvalidTwoBytesValue(
+                msg::Displayable::from(buf).to_owned(),
+            ));
+        }
+
+        Ok(lsb as u16 + ((msb as u16) << 7))
     }
 
-    let (lsb, msb) = (buf[0], buf[1]);
-    if lsb > 0x7f || msb > 0x7f {
-        return Err(Error::InvalidValue);
-    }
+    #[inline]
+    pub fn to_be(val: u16) -> Result<[u8; 2], Error> {
+        if val > MAX {
+            return Err(Error::InvalidU14(val));
+        }
 
-    Ok(lsb as u16 + ((msb as u16) << 7))
+        Ok([val as u8 & 0x7f, (val >> 7) as u8])
+    }
 }
 
-#[inline]
-pub fn u16_to_be(val: u16) -> [u8; 2] {
-    if val > 0x3fff {
-        return [0x7f, 0x7f];
+pub mod normalized_f64 {
+    use super::Error;
+
+    pub const MAX: f64 = 1f64;
+    pub const QUANTUM: f64 = 1f64 / super::u14::MAX as f64;
+
+    #[inline]
+    pub fn from_be(buf: &[u8]) -> Result<f64, Error> {
+        let val = super::u14::from_be(buf)?;
+
+        Ok(val as f64 * QUANTUM)
     }
 
-    [val as u8 & 0x7f, (val >> 7) as u8]
+    #[inline]
+    pub fn to_be(val: f64) -> Result<[u8; 2], Error> {
+        if val > MAX {
+            return Err(Error::InvalidNormalizedFloat(val));
+        }
+
+        let val = (super::u14::MAX as f64 * val) as u16;
+
+        Ok([val as u8 & 0x7f, (val >> 7) as u8])
+    }
 }

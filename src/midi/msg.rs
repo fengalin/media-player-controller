@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{borrow::Cow, fmt};
 
 use super::Error;
 
@@ -35,11 +35,24 @@ impl std::borrow::Borrow<[u8]> for Msg {
     }
 }
 
-pub struct Displayable<'a>(&'a [u8]);
+#[derive(Debug)]
+pub struct Displayable<'a>(Cow<'a, [u8]>);
 
 impl<'a> From<&'a [u8]> for Displayable<'a> {
     fn from(msg: &'a [u8]) -> Self {
-        Self(msg)
+        Self(Cow::Borrowed(msg))
+    }
+}
+
+impl From<Box<[u8]>> for Displayable<'static> {
+    fn from(msg: Box<[u8]>) -> Self {
+        Self(Cow::Owned(msg.into()))
+    }
+}
+
+impl<'a> Displayable<'a> {
+    pub fn to_owned(&self) -> Displayable<'static> {
+        Displayable::from(Box::<[u8]>::from(self.0.as_ref()))
     }
 }
 
