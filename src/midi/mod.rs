@@ -64,7 +64,7 @@ pub fn be_to_u16(buf: &[u8]) -> Result<u16, Error> {
 #[inline]
 pub fn u16_to_be(val: u16) -> [u8; 2] {
     if val > 0x3fff {
-        return [0x7f, 0x7f]
+        return [0x7f, 0x7f];
     }
 
     [val as u8 & 0x7f, (val >> 7) as u8]

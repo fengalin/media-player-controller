@@ -86,12 +86,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "000444226fcff248f2bc4c7625be32c63caccfecc2723a2b9f78a7487a49c407"
 
 [[package]]
-name = "ascii"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbf56136a5198c7b01a49e3afcbef6cf84597273d298f54432926024107b0109"
-
-[[package]]
 name = "async-broadcast"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -238,18 +232,18 @@ checksum = "a4a45a46ab1f2412e53d3a0ade76ffad2025804294569aae387231a0cd6e0899"
 
 [[package]]
 name = "bytemuck"
-version = "1.8.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e851ca7c24871e7336801608a4797d7376545b6928a10d32d75685687141ead"
+checksum = "ee1e0e2125faccb856bf10b0a9dfa89c4c718d05ef85580dfefbdf1c422ef801"
 dependencies = [
  "bytemuck_derive",
 ]
 
 [[package]]
 name = "bytemuck_derive"
-version = "1.0.1"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e215f8c2f9f79cb53c8335e687ffd07d5bfcb6fe5fc80723762d0be46e7cc54"
+checksum = "562e382481975bc61d11275ac5e62a19abd00b0547d99516a415336f183dcd0e"
 dependencies = [
  "proc-macro2",
  "quote 1.0.17",
@@ -399,6 +393,16 @@ dependencies = [
 
 [[package]]
 name = "core-foundation"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25bfd746d203017f7d5cbd31ee5d8e17f94b6521c7af77ece6c9e4b2d4b16c67"
+dependencies = [
+ "core-foundation-sys 0.2.3",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57d24c7a13c43e870e37c1556b74555437870a04514f7685f5b354e090567171"
@@ -414,6 +418,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "194a7a9e6de53fa55116934067c844d9d749312f75c6f6d0980e8c252f8c2146"
 dependencies = [
  "core-foundation-sys 0.8.3",
+ "libc",
+]
+
+[[package]]
+name = "core-foundation-sys"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "065a5d7ffdcbc8fa145d6f0746f3555025b9097a9e9cda59f7467abae670c78d"
+dependencies = [
  "libc",
 ]
 
@@ -481,22 +494,23 @@ dependencies = [
 
 [[package]]
 name = "coremidi"
-version = "0.6.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a7847ca018a67204508b77cb9e6de670125075f7464fff5f673023378fa34f5"
+checksum = "99f92de5534f182bad5f91cad85611ab222cb6e237a0555e06c65a24936c3173"
 dependencies = [
- "core-foundation 0.9.3",
- "core-foundation-sys 0.8.3",
+ "core-foundation 0.2.3",
+ "core-foundation-sys 0.2.3",
  "coremidi-sys",
+ "time",
 ]
 
 [[package]]
 name = "coremidi-sys"
-version = "3.1.0"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79a6deed0c97b2d40abbab77e4c97f81d71e162600423382c277dd640019116c"
+checksum = "07f05827cebb30dcd539ff1ac9bf6764f574a15fa147f8572f99d7617142f95e"
 dependencies = [
- "core-foundation-sys 0.8.3",
+ "core-foundation-sys 0.2.3",
 ]
 
 [[package]]
@@ -1484,18 +1498,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "midi-msg"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73b6b943210f8c188307292a8d224fb51244fc0af5bb6677ddd3c37183a460b4"
-dependencies = [
- "ascii",
-]
-
-[[package]]
 name = "midir"
-version = "0.8.0-pre"
-source = "git+https://github.com/Boddlnagg/midir#641e50d917a067e6fed78b9f70173a07c31a5160"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25df1e7836ca65078a121efed77049084a434838562b9892d0401bdfb59244cc"
 dependencies = [
  "alsa",
  "bitflags",
@@ -1506,7 +1512,7 @@ dependencies = [
  "nix 0.15.0",
  "wasm-bindgen",
  "web-sys",
- "windows",
+ "winapi",
 ]
 
 [[package]]
@@ -1560,7 +1566,7 @@ dependencies = [
 [[package]]
 name = "mpris"
 version = "2.0.0-rc2"
-source = "git+https://github.com/Mange/mpris-rs#8cfe48172d56ddf2b3256af78ad57be20a57540e"
+source = "git+https://github.com/Mange/mpris-rs?rev=8cfe48172d56ddf2b3256af78ad57be20a57540e#8cfe48172d56ddf2b3256af78ad57be20a57540e"
 dependencies = [
  "dbus",
  "derive_is_enum_variant",
@@ -1578,7 +1584,6 @@ dependencies = [
  "env_logger",
  "image",
  "log",
- "midi-msg",
  "midir",
  "mpris",
  "once_cell",
@@ -2415,6 +2420,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "time"
+version = "0.1.43"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca8a50ef2360fbd1eeb0ecd46795a87a19024eb4b53c5dc916ca1fd95fe62438"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "tinyvec"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2786,49 +2801,6 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
-
-[[package]]
-name = "windows"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbedf6db9096bc2364adce0ae0aa636dcd89f3c3f2cd67947062aaf0ca2a10ec"
-dependencies = [
- "windows_aarch64_msvc",
- "windows_i686_gnu",
- "windows_i686_msvc",
- "windows_x86_64_gnu",
- "windows_x86_64_msvc",
-]
-
-[[package]]
-name = "windows_aarch64_msvc"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8e92753b1c443191654ec532f14c199742964a061be25d77d7a96f09db20bf5"
-
-[[package]]
-name = "windows_i686_gnu"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a711c68811799e017b6038e0922cb27a5e2f43a2ddb609fe0b6f3eeda9de615"
-
-[[package]]
-name = "windows_i686_msvc"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146c11bb1a02615db74680b32a68e2d61f553cc24c4eb5b4ca10311740e44172"
-
-[[package]]
-name = "windows_x86_64_gnu"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c912b12f7454c6620635bbff3450962753834be2a594819bd5e945af18ec64bc"
-
-[[package]]
-name = "windows_x86_64_msvc"
-version = "0.32.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "504a2476202769977a040c6364301a3f65d0cc9e3fb08600b2bda150a0488316"
 
 [[package]]
 name = "winit"
