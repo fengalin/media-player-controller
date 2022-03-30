@@ -21,6 +21,10 @@ impl<IO: midir::MidiIO, Conn> DirectionalPorts<IO, Conn> {
         self.cur.as_ref()
     }
 
+    pub fn is_connected(&self) -> bool {
+        self.midi_conn.is_connected()
+    }
+
     fn refresh_from(&mut self, conn: IO) -> Result<(), super::Error> {
         self.map.clear();
 
@@ -114,10 +118,6 @@ impl PortsOut {
         self.refresh_from(temp_conn)?;
 
         Ok(())
-    }
-
-    pub fn is_connected(&self) -> bool {
-        self.midi_conn.is_connected()
     }
 
     pub fn connect(&mut self, port_name: Arc<str>) -> Result<(), super::Error> {

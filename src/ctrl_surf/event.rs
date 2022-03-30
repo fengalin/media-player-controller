@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub enum CtrlSurfEvent {
     Transport(Transport),
     Mixer(Mixer),
+    Identification(Result<(), super::Error>),
 }
 
 #[derive(Debug)]

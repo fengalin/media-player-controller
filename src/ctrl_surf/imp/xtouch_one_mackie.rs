@@ -4,16 +4,22 @@ use crate::{
     ctrl_surf::{
         self,
         event::{self, *},
-        Response,
+        Error, Response,
     },
     midi::{self, MsgList},
 };
 
-/*
-const MACKIE_ID: [u8; 2] = [0x00, 0x66];
+const MACKIE_ID: [u8; 3] = [0x00, 0x00, 0x66];
 const MCU_ID: u8 = 0x14;
-*/
-// const MCU_EXT_ID: u8 = 0x15;
+const QUERY_STATUS: u8 = 0x00;
+
+const IDENTIFICATION_DATA: [u8; MACKIE_ID.len() + 2] = [
+    MACKIE_ID[0],
+    MACKIE_ID[1],
+    MACKIE_ID[2],
+    MCU_ID,
+    QUERY_STATUS,
+];
 
 mod button {
     use crate::midi::Tag;
@@ -49,6 +55,7 @@ mod fader {
 enum State {
     Playing,
     Stopped,
+    AwaitingDeviceId,
 }
 
 #[derive(Clone, Copy)]
@@ -76,15 +83,24 @@ impl Default for XTouchOneMackie {
 }
 
 impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
-    fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Response {
-        let msg = msg.into_inner();
+    fn start_identification(&mut self) -> Response {
+        self.reset();
+        self.state = State::AwaitingDeviceId;
 
-        if let Some(&tag_chan) = msg.first() {
+        log::debug!("Starting device identification");
+
+        Response::from_msg(midi::Msg::new_sysex(&IDENTIFICATION_DATA))
+    }
+
+    fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Response {
+        let buf = msg.inner();
+
+        if let Some(&tag_chan) = buf.first() {
             self.chan = midi::Channel::from(tag_chan);
 
-            match midi::Tag::from(tag_chan) {
+            match midi::Tag::from_tag_chan(tag_chan) {
                 button::TAG => {
-                    if let Some(id_value) = msg.get(1..=2) {
+                    if let Some(id_value) = buf.get(1..=2) {
                         use button::*;
                         use Transport::*;
 
@@ -99,10 +115,11 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
                     }
                 }
                 fader::TAG => {
-                    if let Some(value) = msg.get(1..=2) {
+                    if let Some(value) = buf.get(1..=2) {
                         return self.fader_moved(value);
                     }
                 }
+                midi::sysex::TAG => return self.handle_sysex_msg(msg),
                 _ => (),
             }
         }
@@ -111,8 +128,12 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
     }
 
     fn event_to_device(&mut self, event: Feedback) -> Response {
-        use Feedback::*;
+        if self.state == State::AwaitingDeviceId {
+            log::warn!("Ignoring event while awaiting device Id");
+            return Response::none();
+        }
 
+        use Feedback::*;
         match event {
             Transport(event) => {
                 use event::Transport::*;
@@ -135,7 +156,7 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
                 match data {
                     Timecode(tc) => return self.timecode(tc),
                     Player(player) => {
-                        log::debug!("ctrl_surf got {}", player);
+                        log::debug!("got {}", player);
                         return Response::from_msg_list(self.reset());
                         // FIXME send to device
                     }
@@ -233,6 +254,7 @@ impl XTouchOneMackie {
                 list.push([tag_chan, STOP, OFF]);
             }
             Playing => (),
+            AwaitingDeviceId => unreachable!(),
         }
 
         list.push([tag_chan, PLAY, ON]);
@@ -253,6 +275,7 @@ impl XTouchOneMackie {
                 list.push([tag_chan, PLAY, OFF]);
             }
             Stopped => (),
+            AwaitingDeviceId => unreachable!(),
         }
 
         list.push([tag_chan, STOP, ON]);
@@ -289,6 +312,60 @@ impl XTouchOneMackie {
         self.last_tc = tc;
 
         Response::from_msg_list(list)
+    }
+}
+
+impl XTouchOneMackie {
+    fn handle_sysex_msg(&mut self, msg: midi::Msg) -> Response {
+        if self.state != State::AwaitingDeviceId {
+            log::debug!("Ignoring sysex message {}", msg.display());
+            return Response::none();
+        }
+
+        let res = self.handle_identification_resp(msg);
+        Response::from_event(CtrlSurfEvent::Identification(res))
+    }
+
+    fn handle_identification_resp(&mut self, msg: midi::Msg) -> Result<(), Error> {
+        use crate::bytes::Displayable;
+        use Error::*;
+
+        self.state = State::Stopped;
+
+        let data = msg.try_get_sysex_data()?;
+        if data.len() < 5 {
+            return Err(UnexpectedDeviceResponse(msg.display().to_owned()));
+        }
+
+        if data[0..3] != MACKIE_ID {
+            return Err(ManufacturerMismatch {
+                expected: Displayable::from(MACKIE_ID.as_slice()).to_owned(),
+                found: Displayable::from(&data[0..3]).to_owned(),
+            });
+        }
+
+        if data[3] != MCU_ID {
+            return Err(DeviceMismatch {
+                expected: MCU_ID,
+                found: data[0],
+            });
+        }
+
+        if data[4] != 0x01 {
+            return Err(UnexpectedDeviceStatus {
+                expected: 0x01,
+                found: data[1],
+            });
+        }
+
+        if let Ok(data_str) = std::str::from_utf8(&data[2..]) {
+            log::debug!("Device identification success. Found: {data_str}");
+        } else {
+            let displayable = Displayable::from(&data[2..]);
+            log::debug!("Device identification success. Found: {displayable}");
+        }
+
+        Ok(())
     }
 }
 

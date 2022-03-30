@@ -1,3 +1,4 @@
+use crate::bytes;
 use std::sync::Arc;
 
 #[derive(Debug, thiserror::Error)]
@@ -24,13 +25,22 @@ pub enum Error {
     PortNotFound(Arc<str>),
 
     #[error("Invalid two bytes value: {}", .0)]
-    InvalidTwoBytesValue(super::msg::Displayable<'static>),
+    InvalidTwoBytesValue(bytes::Displayable<'static>),
 
     #[error("Invalid normalized u14: {}", .0)]
     InvalidU14(u16),
 
     #[error("Invalid normalized float: {}", .0)]
     InvalidNormalizedFloat(f64),
+
+    #[error("Invalid size for sysex msg: {}", .0)]
+    InvalidSysExSize(bytes::Displayable<'static>),
+
+    #[error("Invalid sysex init tag for msg: {}", .0)]
+    InvalidSysExInitTag(bytes::Displayable<'static>),
+
+    #[error("Invalid sysex final tag for msg: {}", .0)]
+    InvalidSysExFinalTag(bytes::Displayable<'static>),
 
     #[error("Couldn't send MIDI message: {}", .0)]
     Send(#[from] midir::SendError),

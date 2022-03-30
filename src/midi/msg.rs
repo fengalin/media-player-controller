@@ -1,6 +1,5 @@
-use std::{borrow::Cow, fmt};
-
 use super::Error;
+use crate::bytes;
 
 pub type Result = std::result::Result<Msg, Error>;
 
@@ -8,12 +7,42 @@ pub type Result = std::result::Result<Msg, Error>;
 pub struct Msg(Box<[u8]>);
 
 impl Msg {
-    pub fn into_inner(self) -> Box<[u8]> {
-        self.0
+    pub fn inner(&self) -> &[u8] {
+        self.0.as_ref()
     }
 
-    pub fn display(&self) -> Displayable {
-        Displayable::from(self.0.as_ref())
+    pub fn display(&self) -> bytes::Displayable {
+        bytes::Displayable::from(self.0.as_ref())
+    }
+
+    pub fn new_sysex(data: &[u8]) -> Self {
+        use super::sysex;
+
+        let mut buf = Vec::with_capacity(data.len() + 2);
+
+        buf.push(sysex::TAG.into());
+        buf.extend(data);
+        buf.push(sysex::END_TAG.into());
+
+        Self(buf.into())
+    }
+
+    pub fn try_get_sysex_data(&self) -> std::result::Result<&[u8], Error> {
+        use super::sysex;
+
+        if self.0.len() < 3 {
+            return Err(Error::InvalidSysExInitTag(self.display().to_owned()));
+        }
+
+        if *self.0.first().unwrap() != sysex::TAG {
+            return Err(Error::InvalidSysExInitTag(self.display().to_owned()));
+        }
+
+        if *self.0.last().unwrap() != sysex::END_TAG {
+            return Err(Error::InvalidSysExFinalTag(self.display().to_owned()));
+        }
+
+        Ok(&self.0[1..self.0.len() - 1])
     }
 }
 
@@ -34,44 +63,6 @@ impl std::ops::Deref for Msg {
 
     fn deref(&self) -> &Self::Target {
         self.0.as_ref()
-    }
-}
-
-#[derive(Debug)]
-pub struct Displayable<'a>(Cow<'a, [u8]>);
-
-impl<'a> From<&'a [u8]> for Displayable<'a> {
-    fn from(msg: &'a [u8]) -> Self {
-        Self(Cow::Borrowed(msg))
-    }
-}
-
-impl From<Box<[u8]>> for Displayable<'static> {
-    fn from(msg: Box<[u8]>) -> Self {
-        Self(Cow::Owned(msg.into()))
-    }
-}
-
-impl<'a> Displayable<'a> {
-    pub fn to_owned(&self) -> Displayable<'static> {
-        Displayable::from(Box::<[u8]>::from(self.0.as_ref()))
-    }
-}
-
-impl<'a> fmt::Display for Displayable<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut iter = self.0.iter();
-
-        match iter.next() {
-            Some(first) => write!(f, "(hex): {:02x}", first)?,
-            None => return Ok(()),
-        };
-
-        for val in iter {
-            write!(f, ", {:02x}", val)?;
-        }
-
-        Ok(())
     }
 }
 

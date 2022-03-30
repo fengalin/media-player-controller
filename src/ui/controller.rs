@@ -160,9 +160,17 @@ impl<'a> Controller<'a> {
                     let _ = ctrl_surf_tx.send(resp);
                 };
                 self.midi_ports_in.connect(port_name, callback)?;
+
+                if self.midi_ports_out.is_connected() {
+                    self.start_device_identification()?;
+                }
             }
             Direction::Out => {
                 self.midi_ports_out.connect(port_name)?;
+
+                if self.midi_ports_in.is_connected() {
+                    self.start_device_identification()?;
+                }
             }
         }
 
@@ -193,13 +201,24 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
+    fn start_device_identification(&mut self) -> Result<(), app::Error> {
+        if let Some(ref ctrl_surf) = self.ctrl_surf {
+            let resp = ctrl_surf.lock().unwrap().start_identification();
+            self.handle_ctrl_surf_resp(resp)?;
+
+            // FIXME do something about this
+        }
+
+        Ok(())
+    }
+
     fn handle_ctrl_surf_resp(&mut self, resp: ctrl_surf::Response) -> Result<(), app::Error> {
         use CtrlSurfEvent::*;
 
         let (event, msg_list) = resp.into_inner();
 
         if let Some(event) = event {
-            log::info!("Ctrl surf: {event:?}");
+            log::debug!("Ctrl surf: {event:?}");
 
             match event {
                 Transport(_) => self.players.handle_event(event)?,
@@ -208,6 +227,13 @@ impl<'a> Controller<'a> {
                     match mixer {
                         Volume(_) => self.players.handle_event(event)?,
                         Mute => log::warn!("Attempt to mute (unimplemented)"),
+                    }
+                }
+                Identification(res) => {
+                    if let Err(err) = res {
+                        log::debug!("Ctrl surf device identification: {err}");
+                    } else {
+                        log::info!("Ctrl surf device identification success");
                     }
                 }
             }

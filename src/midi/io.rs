@@ -113,7 +113,7 @@ impl MidiOut {
                 conn.send(msg).map_err(|err| {
                     log::error!(
                         "Failed to send MIDI msg {}: {err}",
-                        super::msg::Displayable::from(msg)
+                        crate::bytes::Displayable::from(msg)
                     );
                     err
                 })?;

@@ -1,3 +1,5 @@
+pub mod bytes;
+
 pub mod ctrl_surf;
 pub use ctrl_surf::ControlSurface;
 

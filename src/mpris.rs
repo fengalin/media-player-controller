@@ -160,6 +160,7 @@ impl<'a> Players<'a> {
                     Mute => unimplemented!("Not available on mpris::Player"),
                 }
             }
+            Identification(_) => (),
         }
 
         Ok(())

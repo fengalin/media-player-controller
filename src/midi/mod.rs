@@ -9,11 +9,21 @@ pub use msg::{Msg, MsgList};
 pub mod port;
 pub use port::{DirectionalPorts, PortsIn, PortsOut};
 
+pub mod sysex {
+    use super::Tag;
+    pub const TAG: Tag = Tag::from(0xf0);
+    pub const END_TAG: Tag = Tag::from(0xf7);
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Tag(u8);
 
 impl Tag {
     pub const fn from(byte: u8) -> Self {
+        Self(byte)
+    }
+
+    pub const fn from_tag_chan(byte: u8) -> Self {
         Self(byte & 0xf0)
     }
 }
@@ -21,6 +31,12 @@ impl Tag {
 impl From<Tag> for u8 {
     fn from(tag: Tag) -> u8 {
         tag.0
+    }
+}
+
+impl PartialEq<Tag> for u8 {
+    fn eq(&self, other: &Tag) -> bool {
+        *self == other.0
     }
 }
 
@@ -48,22 +64,24 @@ impl std::ops::BitOr<Channel> for Tag {
 }
 
 pub mod u14 {
-    use super::{msg, Error};
+    use super::Error;
 
     pub const MAX: u16 = 0x3fff;
 
     #[inline]
     pub fn from_be(buf: &[u8]) -> Result<u16, Error> {
+        use crate::bytes;
+
         if buf.len() != 2 {
             return Err(Error::InvalidTwoBytesValue(
-                msg::Displayable::from(buf).to_owned(),
+                bytes::Displayable::from(buf).to_owned(),
             ));
         }
 
         let (lsb, msb) = (buf[0], buf[1]);
         if lsb > 0x7f || msb > 0x7f {
             return Err(Error::InvalidTwoBytesValue(
-                msg::Displayable::from(buf).to_owned(),
+                bytes::Displayable::from(buf).to_owned(),
             ));
         }
 

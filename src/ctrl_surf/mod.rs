@@ -1,6 +1,9 @@
 pub mod data;
 pub use data::{Timecode, Track};
 
+pub mod error;
+pub use error::Error;
+
 pub mod event;
 pub use event::CtrlSurfEvent;
 
@@ -73,6 +76,7 @@ impl Response {
 }
 
 pub trait ControlSurface: Send + 'static {
+    fn start_identification(&mut self) -> Response;
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Response;
     fn event_to_device(&mut self, event: event::Feedback) -> Response;
     fn reset(&mut self) -> midi::MsgList;
