@@ -1,37 +1,101 @@
-use std::{error, fmt};
+use std::fmt;
+
+use super::Error;
 
 pub type Result = std::result::Result<Msg, Error>;
 
-impl TryFrom<(u64, &[u8])> for Msg {
-    type Error = self::Error;
+#[derive(Debug, Default)]
+pub struct Msg(Box<[u8]>);
 
-    fn try_from(ts_buf: (u64, &[u8])) -> Result {
-        match midi_msg::MidiMsg::from_midi(ts_buf.1) {
-            Ok((msg, _len)) => Ok(Msg {
-                ts: ts_buf.0,
-                inner: msg,
-            }),
-            Err(err) => Err(Error { ts: ts_buf.0, err }),
-        }
+impl Msg {
+    pub fn into_inner(self) -> Box<[u8]> {
+        self.0
+    }
+
+    pub fn display(&self) -> Displayable {
+        Displayable::from(self.0.as_ref())
     }
 }
 
-#[derive(Debug)]
-pub struct Msg {
-    pub ts: u64,
-    pub inner: midi_msg::MidiMsg,
+impl<const S: usize> From<[u8; S]> for Msg {
+    fn from(buf: [u8; S]) -> Self {
+        Self(buf.into())
+    }
 }
 
-#[derive(Debug)]
-pub struct Error {
-    pub ts: u64,
-    pub err: midi_msg::ParseError,
+impl From<&[u8]> for Msg {
+    fn from(buf: &[u8]) -> Self {
+        Self(buf.into())
+    }
 }
 
-impl fmt::Display for Error {
+impl std::borrow::Borrow<[u8]> for Msg {
+    fn borrow(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+pub struct Displayable<'a>(&'a [u8]);
+
+impl<'a> From<&'a [u8]> for Displayable<'a> {
+    fn from(msg: &'a [u8]) -> Self {
+        Self(msg)
+    }
+}
+
+impl<'a> fmt::Display for Displayable<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} @ {}", self.err, self.ts)
+        let mut iter = self.0.iter();
+
+        match iter.next() {
+            Some(first) => write!(f, "(hex): {:02x}", first)?,
+            None => return Ok(()),
+        };
+
+        for val in iter {
+            write!(f, ", {:02x}", val)?;
+        }
+
+        Ok(())
     }
 }
 
-impl error::Error for Error {}
+#[derive(Debug, Default)]
+pub struct MsgList(Vec<Msg>);
+
+impl MsgList {
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    pub fn none() -> Self {
+        Self(Vec::with_capacity(0))
+    }
+
+    pub fn push(&mut self, msg: impl Into<Msg>) {
+        self.0.push(msg.into())
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl IntoIterator for MsgList {
+    type Item = Msg;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl<T: Into<Msg>> From<T> for MsgList {
+    fn from(msg: T) -> Self {
+        Self(vec![msg.into()])
+    }
+}

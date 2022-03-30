@@ -107,16 +107,19 @@ impl MidiOut {
         Ok(())
     }
 
-    pub fn send(&mut self, message: &[u8]) -> Result<(), super::Error> {
+    pub fn send(&mut self, msg: &[u8]) -> Result<(), super::Error> {
         match self {
             Self::Connected(conn) => {
-                conn.send(message).map_err(|err| {
-                    log::error!("Failed to send a MIDI message");
+                conn.send(msg).map_err(|err| {
+                    log::error!(
+                        "Failed to send MIDI msg {}: {err}",
+                        super::msg::Displayable::from(msg)
+                    );
                     err
                 })?;
             }
             _ => {
-                log::warn!("Attempt to send a message, but MIDI Out is not connected");
+                log::warn!("Attempt to send a msg, but MIDI Out is not connected");
                 return Err(super::Error::NotConnected);
             }
         }

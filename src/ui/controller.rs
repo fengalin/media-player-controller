@@ -155,14 +155,9 @@ impl<'a> Controller<'a> {
                 self.ctrl_surf = Some(ctrl_surf.clone());
 
                 let ctrl_surf_tx = self.ctrl_surf_tx.clone();
-                let callback = move |msg_res| match msg_res {
-                    Ok(msg) => {
-                        let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
-                        let _ = ctrl_surf_tx.send(resp);
-                    }
-                    Err(err) => {
-                        log::error!("Error parsing Midi message: {err}");
-                    }
+                let callback = move |msg| {
+                    let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
+                    let _ = ctrl_surf_tx.send(resp);
                 };
                 self.midi_ports_in.connect(port_name, callback)?;
             }
@@ -220,7 +215,7 @@ impl<'a> Controller<'a> {
 
         if self.midi_ports_out.is_connected() {
             for msg in msg_list {
-                let _ = self.midi_ports_out.send(&msg);
+                let _ = self.midi_ports_out.send(msg);
             }
         }
 

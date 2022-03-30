@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, sync::Arc};
+use std::{borrow::Borrow, collections::BTreeMap, sync::Arc};
 
 use super::io;
 
@@ -62,7 +62,7 @@ impl PortsIn {
 
     pub fn connect<C>(&mut self, port_name: Arc<str>, mut callback: C) -> Result<(), super::Error>
     where
-        C: FnMut(super::msg::Result) + Send + 'static,
+        C: FnMut(super::Msg) + Send + 'static,
     {
         let port = self
             .map
@@ -75,7 +75,7 @@ impl PortsIn {
                 port_name.clone(),
                 &port,
                 &self.client_name,
-                move |ts, buf| callback((ts, buf).try_into()),
+                move |_ts, buf| callback(buf.into()),
             )
             .map_err(|_| {
                 self.cur = None;
@@ -140,8 +140,8 @@ impl PortsOut {
         Ok(())
     }
 
-    pub fn send(&mut self, message: &[u8]) -> Result<(), super::Error> {
-        self.midi_conn.send(message)
+    pub fn send(&mut self, msg: impl Borrow<[u8]>) -> Result<(), super::Error> {
+        self.midi_conn.send(msg.borrow())
     }
 
     pub fn disconnect(&mut self) {

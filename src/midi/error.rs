@@ -11,8 +11,8 @@ pub enum Error {
     #[error("MIDI port not connected")]
     NotConnected,
 
-    #[error("Failed to parse MIDI message")]
-    Parse(#[from] midi_msg::ParseError),
+    #[error("Invalid MIDI value")]
+    InvalidValue,
 
     #[error("Midi port creation failed")]
     PortCreation,

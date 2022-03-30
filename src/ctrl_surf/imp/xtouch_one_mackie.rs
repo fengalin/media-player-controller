@@ -1,11 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use crate::ctrl_surf::{
-    self,
-    event::{self, *},
-    MidiMsgList, Response,
+use crate::{
+    ctrl_surf::{
+        self,
+        event::{self, *},
+        Response,
+    },
+    midi::{self, MsgList},
 };
-use crate::midi;
 
 /*
 const MACKIE_ID: [u8; 2] = [0x00, 0x66];
@@ -13,24 +15,36 @@ const MCU_ID: u8 = 0x14;
 */
 // const MCU_EXT_ID: u8 = 0x15;
 
-// Only one channel for now (X-Touch One)
-const CHANNEL: midi_msg::Channel = midi_msg::Channel::Ch1;
+mod button {
+    use crate::midi::Tag;
+    pub const TAG: Tag = Tag::from(0x90);
 
-pub const BUTTON_PRESSED: u8 = 127;
-pub const BUTTON_RELEASED: u8 = 0;
-pub const BUTTON_ON: u8 = BUTTON_PRESSED;
-pub const BUTTON_OFF: u8 = BUTTON_RELEASED;
+    pub const PRESSED: u8 = 127;
+    pub const RELEASED: u8 = 0;
+    pub const ON: u8 = PRESSED;
+    pub const OFF: u8 = RELEASED;
 
-const FADER_MAX: u16 = 0x3fff;
-const FADER_STEP: f64 = 1f64 / FADER_MAX as f64;
-const FADER_TOUCH_THRSD: u8 = 64;
-
-mod note {
     pub const PREVIOUS: u8 = 91;
     pub const NEXT: u8 = 92;
     pub const STOP: u8 = 93;
     pub const PLAY: u8 = 94;
-    pub const FADER_TOUCH: u8 = 104;
+    pub const FADER_TOUCHED: u8 = 104;
+}
+
+mod display_7_seg {
+    use crate::midi::Tag;
+    pub const TAG: Tag = Tag::from(0xb0);
+
+    pub const TIME_LEFT_DIGIT: u8 = 0x49;
+}
+
+mod fader {
+    use crate::midi::Tag;
+    pub const TAG: Tag = Tag::from(0xe0);
+
+    pub const MAX: u16 = 0x3fff;
+    pub const STEP: f64 = 1f64 / MAX as f64;
+    pub const TOUCH_THRSD: u8 = 64;
 }
 
 #[derive(PartialEq)]
@@ -47,6 +61,7 @@ enum FaderState {
 
 pub struct XTouchOneMackie {
     last_tc: TimecodeBreakDown,
+    chan: midi::Channel,
     state: State,
     fader_state: FaderState,
 }
@@ -55,6 +70,7 @@ impl Default for XTouchOneMackie {
     fn default() -> Self {
         Self {
             last_tc: TimecodeBreakDown::default(),
+            chan: midi::Channel::default(),
             state: State::Stopped,
             fader_state: FaderState::Released,
         }
@@ -63,31 +79,31 @@ impl Default for XTouchOneMackie {
 
 impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Response {
-        use midi_msg::MidiMsg::*;
+        let msg = msg.into_inner();
 
-        if let ChannelVoice { channel, msg } = msg.inner {
-            if channel != CHANNEL {
-                return Response::none();
-            }
+        if let Some(&tag_chan) = msg.first() {
+            self.chan = midi::Channel::from(tag_chan);
 
-            use midi_msg::ChannelVoiceMsg::*;
-            match msg {
-                NoteOn { note, velocity } => {
-                    use Transport::*;
+            match midi::Tag::from(tag_chan) {
+                button::TAG => {
+                    if let Some(id_value) = msg.get(1..=2) {
+                        use button::*;
+                        use Transport::*;
 
-                    let is_pressed = velocity == BUTTON_PRESSED;
-                    match note {
-                        note::PREVIOUS if is_pressed => return Response::from_event(Previous),
-                        note::NEXT if is_pressed => return Response::from_event(Next),
-                        note::STOP if is_pressed => return Response::from_event(Stop),
-                        note::PLAY if is_pressed => return Response::from_event(PlayPause),
-                        note::FADER_TOUCH => return self.fader_touch(velocity),
-                        _ => (),
+                        match id_value {
+                            [PREVIOUS, PRESSED] => return Response::from_event(Previous),
+                            [NEXT, PRESSED] => return Response::from_event(Next),
+                            [STOP, PRESSED] => return Response::from_event(Stop),
+                            [PLAY, PRESSED] => return Response::from_event(PlayPause),
+                            [FADER_TOUCHED, value] => return self.fader_touch(*value),
+                            _ => (),
+                        }
                     }
                 }
-                // FIXME use raw msg
-                PitchBend { bend } => {
-                    return self.fader_moved(bend);
+                fader::TAG => {
+                    if let Some(value) = msg.get(1..=2) {
+                        return self.fader_moved(value);
+                    }
                 }
                 _ => (),
             }
@@ -133,16 +149,20 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
         Response::none()
     }
 
-    fn reset(&mut self) -> MidiMsgList {
-        let mut list = MidiMsgList::new();
-        list.push(midi::build_note_on(CHANNEL, note::PREVIOUS, BUTTON_OFF).to_midi());
-        list.push(midi::build_note_on(CHANNEL, note::NEXT, BUTTON_OFF).to_midi());
-        list.push(midi::build_note_on(CHANNEL, note::STOP, BUTTON_OFF).to_midi());
-        list.push(midi::build_note_on(CHANNEL, note::PLAY, BUTTON_OFF).to_midi());
+    fn reset(&mut self) -> MsgList {
+        use button::*;
+        use display_7_seg::*;
 
-        // Reset 7 segments display
+        let mut list = MsgList::new();
+
+        let tag_chan = button::TAG | self.chan;
+        list.push([tag_chan, PREVIOUS, OFF]);
+        list.push([tag_chan, NEXT, OFF]);
+        list.push([tag_chan, STOP, OFF]);
+        list.push([tag_chan, PLAY, OFF]);
+
         for idx in 0..10 {
-            list.push([0xb0, 0x49 - idx as u8, b' ']);
+            list.push([display_7_seg::TAG.into(), TIME_LEFT_DIGIT - idx as u8, b' ']);
         }
 
         *self = XTouchOneMackie::default();
@@ -152,10 +172,15 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
 }
 
 impl XTouchOneMackie {
+    fn build_fader_msg(&self, vol: f64) -> [u8; 3] {
+        let two_bytes = midi::u16_to_be((fader::MAX as f64 * vol) as u16);
+        [fader::TAG | self.chan, two_bytes[0], two_bytes[1]]
+    }
+
     fn fader_touch(&mut self, value: u8) -> Response {
         use FaderState::*;
 
-        let is_touched = value > FADER_TOUCH_THRSD;
+        let is_touched = value > fader::TOUCH_THRSD;
         match self.fader_state {
             Released if is_touched => {
                 self.fader_state = Touched { last_volume: None };
@@ -163,11 +188,7 @@ impl XTouchOneMackie {
             Touched { last_volume } if !is_touched => {
                 self.fader_state = Released;
                 if let Some(vol) = last_volume {
-                    return Response::from(
-                        Mixer::Volume(vol),
-                        // FIXME pass a buffer to ease adaptation for multi faders ctrl surfs
-                        midi::build_pitch_bend(CHANNEL, (FADER_MAX as f64 * vol) as u16).to_midi(),
-                    );
+                    return Response::from(Mixer::Volume(vol), self.build_fader_msg(vol));
                 }
             }
             _ => (),
@@ -176,10 +197,18 @@ impl XTouchOneMackie {
         Response::none()
     }
 
-    fn fader_moved(&mut self, value: u16) -> Response {
+    fn fader_moved(&mut self, value: &[u8]) -> Response {
         use FaderState::*;
 
-        let vol = value.min(FADER_MAX) as f64 * FADER_STEP;
+        let value = match midi::be_to_u16(value) {
+            Ok(value) => value,
+            Err(err) => {
+                log::error!("Fader moved value: {err}");
+                return Response::none();
+            }
+        };
+
+        let vol = value.min(fader::MAX) as f64 * fader::STEP;
 
         match &mut self.fader_state {
             Touched { last_volume } => {
@@ -196,35 +225,41 @@ impl XTouchOneMackie {
 
 impl XTouchOneMackie {
     fn play(&mut self) -> Response {
+        use button::*;
         use State::*;
 
-        let mut list = MidiMsgList::new();
+        let mut list = MsgList::new();
+        let tag_chan = button::TAG | self.chan;
+
         match self.state {
             Stopped => {
                 self.state = Playing;
-                list.push(midi::build_note_on(CHANNEL, note::STOP, BUTTON_OFF).to_midi());
+                list.push([tag_chan, STOP, OFF]);
             }
             Playing => (),
         }
 
-        list.push(midi::build_note_on(CHANNEL, note::PLAY, BUTTON_ON).to_midi());
+        list.push([tag_chan, PLAY, ON]);
 
         Response::from_msg_list(list)
     }
 
     fn pause(&mut self) -> Response {
+        use button::*;
         use State::*;
 
-        let mut list = MidiMsgList::new();
+        let mut list = MsgList::new();
+        let tag_chan = button::TAG | self.chan;
+
         match self.state {
             Playing => {
                 self.state = Stopped;
-                list.push(midi::build_note_on(CHANNEL, note::PLAY, BUTTON_OFF).to_midi());
+                list.push([tag_chan, PLAY, OFF]);
             }
             Stopped => (),
         }
 
-        list.push(midi::build_note_on(CHANNEL, note::STOP, BUTTON_ON).to_midi());
+        list.push([tag_chan, STOP, ON]);
 
         Response::from_msg_list(list)
     }
@@ -233,12 +268,7 @@ impl XTouchOneMackie {
         use FaderState::*;
 
         match &mut self.fader_state {
-            Released => {
-                // FIXME pass a buffer to ease adaptation for multi faders ctrl surfs
-                Response::from_msg_list(
-                    midi::build_pitch_bend(CHANNEL, (FADER_MAX as f64 * vol) as u16).to_midi(),
-                )
-            }
+            Released => Response::from_msg(self.build_fader_msg(vol)),
             Touched { last_volume } => {
                 // user touches fader => don't move it before it's released.
                 *last_volume = Some(vol);
@@ -249,12 +279,12 @@ impl XTouchOneMackie {
     }
 
     fn timecode(&mut self, tc: ctrl_surf::Timecode) -> Response {
-        let mut list = MidiMsgList::new();
+        let mut list = MsgList::new();
         let tc = TimecodeBreakDown::from(tc);
 
         for (idx, (&last_digit, digit)) in self.last_tc.0.iter().zip(tc.0).enumerate() {
             if last_digit != digit {
-                list.push(vec![0xb0, 0x49 - idx as u8, digit]);
+                list.push([0xb0, 0x49 - idx as u8, digit]);
             }
         }
 

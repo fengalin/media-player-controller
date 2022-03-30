@@ -4,37 +4,68 @@ pub use error::Error;
 mod io;
 
 pub mod msg;
-pub use msg::Msg;
+pub use msg::{Msg, MsgList};
 
 pub mod port;
 pub use port::{DirectionalPorts, PortsIn, PortsOut};
 
-pub fn build_cc(channel: midi_msg::Channel, control: u8, value: u8) -> midi_msg::MidiMsg {
-    midi_msg::MidiMsg::ChannelVoice {
-        channel,
-        msg: midi_msg::ChannelVoiceMsg::ControlChange {
-            control: midi_msg::ControlChange::Undefined { control, value },
-        },
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Tag(u8);
+
+impl Tag {
+    pub const fn from(byte: u8) -> Self {
+        Self(byte & 0xf0)
     }
 }
 
-pub fn build_note_on(channel: midi_msg::Channel, note: u8, velocity: u8) -> midi_msg::MidiMsg {
-    midi_msg::MidiMsg::ChannelVoice {
-        channel,
-        msg: midi_msg::ChannelVoiceMsg::NoteOn { note, velocity },
+impl From<Tag> for u8 {
+    fn from(tag: Tag) -> u8 {
+        tag.0
     }
 }
 
-pub fn build_pitch_bend(channel: midi_msg::Channel, bend: u16) -> midi_msg::MidiMsg {
-    midi_msg::MidiMsg::ChannelVoice {
-        channel,
-        msg: midi_msg::ChannelVoiceMsg::PitchBend { bend },
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Channel(u8);
+
+impl Channel {
+    pub const fn from(byte: u8) -> Self {
+        Self(byte & 0x0f)
     }
 }
 
-pub fn build_channel_pressure(channel: midi_msg::Channel, pressure: u8) -> midi_msg::MidiMsg {
-    midi_msg::MidiMsg::ChannelVoice {
-        channel,
-        msg: midi_msg::ChannelVoiceMsg::ChannelPressure { pressure },
+impl From<Channel> for u8 {
+    fn from(chan: Channel) -> u8 {
+        chan.0
     }
+}
+
+impl std::ops::BitOr<Channel> for Tag {
+    type Output = u8;
+
+    fn bitor(self, chan: Channel) -> Self::Output {
+        self.0 | chan.0
+    }
+}
+
+#[inline]
+pub fn be_to_u16(buf: &[u8]) -> Result<u16, Error> {
+    if buf.len() != 2 {
+        return Err(Error::InvalidValue);
+    }
+
+    let (lsb, msb) = (buf[0], buf[1]);
+    if lsb > 0x7f || msb > 0x7f {
+        return Err(Error::InvalidValue);
+    }
+
+    Ok(lsb as u16 + ((msb as u16) << 7))
+}
+
+#[inline]
+pub fn u16_to_be(val: u16) -> [u8; 2] {
+    if val > 0x3fff {
+        return [0x7f, 0x7f]
+    }
+
+    [val as u8 & 0x7f, (val >> 7) as u8]
 }
