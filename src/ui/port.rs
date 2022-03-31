@@ -67,13 +67,13 @@ pub enum Response {
     CheckingList,
 }
 
-pub struct PortsWidget {
+pub struct PortsPanel {
     ports: [DirectionalPorts; 2],
 }
 
-impl PortsWidget {
+impl PortsPanel {
     pub fn new() -> Self {
-        PortsWidget {
+        PortsPanel {
             ports: [DirectionalPorts::default(), DirectionalPorts::default()],
         }
     }
@@ -154,7 +154,7 @@ impl PortsWidget {
 
 /// The following functions must be called from the AppController thread,
 /// not the UI update thread.
-impl PortsWidget {
+impl PortsPanel {
     pub fn update(&mut self, midi_ports_in: &midi::PortsIn, midi_ports_out: &midi::PortsOut) {
         self.ports[Direction::In.idx()].update_from(midi_ports_in);
         self.ports[Direction::Out.idx()].update_from(midi_ports_out);

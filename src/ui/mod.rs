@@ -8,10 +8,10 @@ pub mod controller;
 pub use controller::Spawner;
 
 pub mod ctrl_surf;
-pub use ctrl_surf::ControlSurfaceWidget;
+pub use ctrl_surf::ControlSurfacePanel;
 
 pub mod mpris;
-pub use self::mpris::PlayerWidget;
+pub use self::mpris::PlayerPanel;
 
 pub mod port;
-pub use port::PortsWidget;
+pub use port::PortsPanel;

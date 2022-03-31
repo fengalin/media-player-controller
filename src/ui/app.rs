@@ -30,9 +30,9 @@ pub enum Request {
 pub struct App {
     req_tx: channel::Sender<Request>,
     err_rx: channel::Receiver<Error>,
-    ctrl_surf_widget: Arc<Mutex<super::ControlSurfaceWidget>>,
-    ports_widget: Arc<Mutex<super::PortsWidget>>,
-    player_widget: Arc<Mutex<super::PlayerWidget>>,
+    ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
+    ports_panel: Arc<Mutex<super::PortsPanel>>,
+    player_panel: Arc<Mutex<super::PlayerPanel>>,
     last_err: Option<Error>,
     controller_thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -42,26 +42,26 @@ impl App {
         let (err_tx, err_rx) = channel::unbounded();
         let (req_tx, req_rx) = channel::unbounded();
 
-        let ctrl_surf_widget = Arc::new(Mutex::new(super::ControlSurfaceWidget::new()));
-        let ports_widget = Arc::new(Mutex::new(super::PortsWidget::new()));
-        let player_widget = Arc::new(Mutex::new(super::PlayerWidget::new()));
+        let ctrl_surf_panel = Arc::new(Mutex::new(super::ControlSurfacePanel::new()));
+        let ports_panel = Arc::new(Mutex::new(super::PortsPanel::new()));
+        let player_panel = Arc::new(Mutex::new(super::PlayerPanel::new()));
 
         let controller_thread = controller::Spawner {
             req_rx,
             err_tx,
-            ctrl_surf_widget: ctrl_surf_widget.clone(),
+            ctrl_surf_panel: ctrl_surf_panel.clone(),
             client_name: client_name.into(),
-            ports_widget: ports_widget.clone(),
-            player_widget: player_widget.clone(),
+            ports_panel: ports_panel.clone(),
+            player_panel: player_panel.clone(),
         }
         .spawn();
 
         Ok(Self {
             req_tx,
             err_rx,
-            ports_widget,
-            ctrl_surf_widget,
-            player_widget,
+            ports_panel,
+            ctrl_surf_panel,
+            player_panel,
             last_err: None,
             controller_thread: Some(controller_thread),
         })
@@ -80,26 +80,26 @@ impl epi::App for App {
             ui.add_space(10f32);
 
             ui.group(|ui| {
-                let resp = self.ctrl_surf_widget.lock().unwrap().show(ui);
-                Dispatcher::<super::ControlSurfaceWidget>::handle(self, resp);
+                let resp = self.ctrl_surf_panel.lock().unwrap().show(ui);
+                Dispatcher::<super::ControlSurfacePanel>::handle(self, resp);
 
                 ui.add_space(2f32);
 
                 ui.horizontal(|ui| {
                     use super::port::Direction;
 
-                    let resp_in = self.ports_widget.lock().unwrap().show(Direction::In, ui);
+                    let resp_in = self.ports_panel.lock().unwrap().show(Direction::In, ui);
                     ui.add_space(20f32);
-                    let resp_out = self.ports_widget.lock().unwrap().show(Direction::Out, ui);
+                    let resp_out = self.ports_panel.lock().unwrap().show(Direction::Out, ui);
 
-                    Dispatcher::<super::PortsWidget>::handle(self, resp_in.or(resp_out));
+                    Dispatcher::<super::PortsPanel>::handle(self, resp_in.or(resp_out));
                 });
 
                 ui.add_space(2f32);
                 ui.separator();
 
-                let resp = self.player_widget.lock().unwrap().show(ui);
-                Dispatcher::<super::PlayerWidget>::handle(self, resp);
+                let resp = self.player_panel.lock().unwrap().show(ui);
+                Dispatcher::<super::PlayerPanel>::handle(self, resp);
             });
 
             self.pop_err();
@@ -129,21 +129,26 @@ impl epi::App for App {
         self.req_tx.send(Request::HaveFrame(frame.clone())).unwrap();
         self.req_tx.send(Request::HaveContext(ctx.clone())).unwrap();
 
-        let resps = self.ports_widget.lock().unwrap().setup(storage);
+        let resps = self.ports_panel.lock().unwrap().setup(storage);
         for resp in resps {
-            Dispatcher::<super::PortsWidget>::handle(self, Some(resp));
+            Dispatcher::<super::PortsPanel>::handle(self, Some(resp));
+        }
+        self.send_req(Request::RefreshPorts);
+
+        let resp = self.ctrl_surf_panel.lock().unwrap().setup(storage);
+        if let Some(resp) = resp {
+            Dispatcher::<super::ControlSurfacePanel>::handle(self, Some(resp));
         }
 
-        self.player_widget.lock().unwrap().setup(storage);
-
-        self.send_req(Request::RefreshPorts);
+        self.player_panel.lock().unwrap().setup(storage);
         self.send_req(Request::RefreshPlayers);
     }
 
     fn save(&mut self, storage: &mut dyn epi::Storage) {
         log::info!("Saving...");
-        self.ports_widget.lock().unwrap().save(storage);
-        self.player_widget.lock().unwrap().save(storage);
+        self.ctrl_surf_panel.lock().unwrap().save(storage);
+        self.ports_panel.lock().unwrap().save(storage);
+        self.player_panel.lock().unwrap().save(storage);
         self.clear_last_err();
     }
 

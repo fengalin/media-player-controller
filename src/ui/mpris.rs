@@ -12,7 +12,7 @@ pub enum Response {
     CheckingList,
 }
 
-pub struct PlayerWidget {
+pub struct PlayerPanel {
     list: Vec<Arc<str>>,
     cur: Arc<str>,
     artist: Option<Arc<str>>,
@@ -22,7 +22,7 @@ pub struct PlayerWidget {
     egui_ctx: Option<egui::Context>,
 }
 
-impl PlayerWidget {
+impl PlayerPanel {
     pub fn new() -> Self {
         Self {
             list: Vec::new(),
@@ -121,7 +121,7 @@ impl PlayerWidget {
     }
 }
 
-impl PlayerWidget {
+impl PlayerPanel {
     pub fn update_players(&mut self, players: &mpris::Players) {
         self.list.clear();
 

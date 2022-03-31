@@ -2,7 +2,7 @@ use super::{app, App};
 
 pub struct Dispatcher<T>(std::marker::PhantomData<*const T>);
 
-impl Dispatcher<super::ControlSurfaceWidget> {
+impl Dispatcher<super::ControlSurfacePanel> {
     pub fn handle(app: &mut App, resp: Option<super::ctrl_surf::Response>) {
         if let Some(resp) = resp {
             use super::ctrl_surf::Response::*;
@@ -21,7 +21,7 @@ impl Dispatcher<super::ControlSurfaceWidget> {
     }
 }
 
-impl Dispatcher<super::PortsWidget> {
+impl Dispatcher<super::PortsPanel> {
     pub fn handle(app: &mut App, resp: Option<super::port::Response>) {
         if let Some(resp) = resp {
             use super::port::Response::*;
@@ -42,7 +42,7 @@ impl Dispatcher<super::PortsWidget> {
     }
 }
 
-impl Dispatcher<super::PlayerWidget> {
+impl Dispatcher<super::PlayerPanel> {
     pub fn handle(app: &mut App, resp: Option<super::mpris::Response>) {
         if let Some(resp) = resp {
             use super::mpris::Response::*;
