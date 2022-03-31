@@ -15,7 +15,10 @@ pub struct DirectionalPorts {
 }
 
 impl DirectionalPorts {
-    fn update_from<IO: midir::MidiIO, Conn>(&mut self, ports: &midi::DirectionalPorts<IO, Conn>) {
+    fn update_from<IO: midir::MidiIO, Conn, D>(
+        &mut self,
+        ports: &midi::DirectionalPorts<IO, Conn, D>,
+    ) {
         self.list.clear();
         self.list.extend(ports.list().cloned());
 
@@ -155,7 +158,7 @@ impl PortsPanel {
 /// The following functions must be called from the AppController thread,
 /// not the UI update thread.
 impl PortsPanel {
-    pub fn update(&mut self, midi_ports_in: &midi::PortsIn, midi_ports_out: &midi::PortsOut) {
+    pub fn update<D>(&mut self, midi_ports_in: &midi::PortsIn<D>, midi_ports_out: &midi::PortsOut) {
         self.ports[Direction::In.idx()].update_from(midi_ports_in);
         self.ports[Direction::Out.idx()].update_from(midi_ports_out);
     }

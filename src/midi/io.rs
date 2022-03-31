@@ -1,29 +1,32 @@
 use std::sync::Arc;
 
-pub type MidiIn = DirectionalConnection<midir::MidiInput, midir::MidiInputConnection<()>>;
-pub type MidiOut = DirectionalConnection<midir::MidiOutput, midir::MidiOutputConnection>;
+pub type MidiIn<D> = DirectionalConnection<midir::MidiInput, midir::MidiInputConnection<D>, D>;
+pub type MidiOut = DirectionalConnection<midir::MidiOutput, midir::MidiOutputConnection, ()>;
 
-pub enum DirectionalConnection<IO: midir::MidiIO, C> {
+pub enum DirectionalConnection<IO: midir::MidiIO, C, D> {
     Connected(C),
-    Disconnected(IO),
+    Disconnected((IO, D)),
     None,
 }
 
-impl<IO: midir::MidiIO, C> Default for DirectionalConnection<IO, C> {
+impl<IO: midir::MidiIO, C, D> Default for DirectionalConnection<IO, C, D> {
     fn default() -> Self {
         Self::None
     }
 }
 
-impl<IO: midir::MidiIO, C> DirectionalConnection<IO, C> {
+impl<IO: midir::MidiIO, C, D> DirectionalConnection<IO, C, D> {
     pub fn is_connected(&self) -> bool {
         matches!(self, Self::Connected(_))
     }
 }
 
-impl MidiIn {
-    pub fn try_new(client_name: &str) -> Result<Self, super::Error> {
-        Ok(Self::Disconnected(midir::MidiInput::new(client_name)?))
+impl<D: Send + Clone> MidiIn<D> {
+    pub fn try_new(client_name: &str, data: D) -> Result<Self, super::Error> {
+        Ok(Self::Disconnected((
+            midir::MidiInput::new(client_name)?,
+            data,
+        )))
     }
 
     pub fn connect<C>(
@@ -31,25 +34,22 @@ impl MidiIn {
         port_name: Arc<str>,
         port: &midir::MidiInputPort,
         client_port_name: &str,
-        mut callback: C,
+        callback: C,
     ) -> Result<(), super::Error>
     where
-        C: FnMut(u64, &[u8]) + Send + 'static,
+        C: FnMut(u64, &[u8], &mut D) + Send + 'static,
     {
         self.disconnect();
         match std::mem::take(self) {
-            Self::Disconnected(midi_input) => {
-                match midi_input.connect(
-                    port,
-                    client_port_name,
-                    move |ts, buf, _| callback(ts, buf),
-                    (),
-                ) {
+            Self::Disconnected((midi_input, data)) => {
+                match midi_input.connect(port, client_port_name, callback, data.clone()) {
                     Ok(conn) => {
                         *self = Self::Connected(conn);
                     }
                     Err(err) => {
-                        *self = Self::Disconnected(err.into_inner());
+                        // Unfortunately, err.into_inner() doesn't contain
+                        // data, hence the need for a Clone bound on D.
+                        *self = Self::Disconnected((err.into_inner(), data));
                         let err = super::Error::Connection(port_name);
                         log::error!("{}", err);
                         return Err(err);
@@ -66,8 +66,8 @@ impl MidiIn {
         if self.is_connected() {
             match std::mem::take(self) {
                 Self::Connected(conn) => {
-                    let (io, _) = conn.close();
-                    *self = Self::Disconnected(io);
+                    let (io, data) = conn.close();
+                    *self = Self::Disconnected((io, data));
                 }
                 _ => unreachable!(),
             }
@@ -77,7 +77,10 @@ impl MidiIn {
 
 impl MidiOut {
     pub fn try_new(client_name: &str) -> Result<Self, super::Error> {
-        Ok(Self::Disconnected(midir::MidiOutput::new(client_name)?))
+        Ok(Self::Disconnected((
+            midir::MidiOutput::new(client_name)?,
+            (),
+        )))
     }
 
     pub fn connect(
@@ -88,13 +91,13 @@ impl MidiOut {
     ) -> Result<(), super::Error> {
         self.disconnect();
         match std::mem::take(self) {
-            Self::Disconnected(midi_output) => {
+            Self::Disconnected((midi_output, ())) => {
                 match midi_output.connect(port, client_port_name) {
                     Ok(conn) => {
                         *self = Self::Connected(conn);
                     }
                     Err(err) => {
-                        *self = Self::Disconnected(err.into_inner());
+                        *self = Self::Disconnected((err.into_inner(), ()));
                         let err = super::Error::Connection(port_name);
                         log::error!("{}", err);
                         return Err(err);
@@ -132,7 +135,7 @@ impl MidiOut {
             match std::mem::take(self) {
                 Self::Connected(conn) => {
                     let io = conn.close();
-                    *self = Self::Disconnected(io);
+                    *self = Self::Disconnected((io, ()));
                 }
                 _ => unreachable!(),
             }

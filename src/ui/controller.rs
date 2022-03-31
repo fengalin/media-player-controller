@@ -38,11 +38,10 @@ impl Spawner {
 struct Controller<'a> {
     err_tx: channel::Sender<app::Error>,
 
-    ctrl_surf_tx: channel::Sender<ctrl_surf::Response>,
     ctrl_surf: Option<ctrl_surf::ControlSurfaceArc>,
     ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
 
-    midi_ports_in: midi::PortsIn,
+    midi_ports_in: midi::PortsIn<channel::Sender<midi::Msg>>,
     midi_ports_out: midi::PortsOut,
     ports_panel: Arc<Mutex<super::PortsPanel>>,
 
@@ -64,24 +63,25 @@ impl<'a> Controller<'a> {
         ports_panel: Arc<Mutex<super::PortsPanel>>,
         player_panel: Arc<Mutex<super::PlayerPanel>>,
     ) -> Result<(), ()> {
-        let midi_ports_in = midi::PortsIn::try_new(client_name.clone()).map_err(|err| {
-            log::error!("Error creating Controller: {}", err);
-            let _ = err_tx.send(err.into());
-        })?;
+        let (midi_tx, midi_rx) = channel::unbounded();
+
+        let midi_ports_in =
+            midi::PortsIn::try_new(client_name.clone(), midi_tx).map_err(|err| {
+                log::error!("Error creating Controller: {}", err);
+                let _ = err_tx.send(err.into());
+            })?;
 
         let midi_ports_out = midi::PortsOut::try_new(client_name).map_err(|err| {
             log::error!("Error creating Controller: {}", err);
             let _ = err_tx.send(err.into());
         })?;
 
-        let (ctrl_surf_tx, ctrl_surf_rx) = channel::unbounded();
         let (players, evt_rx) = mpris::Players::new();
 
         Self {
             err_tx,
 
             ctrl_surf: None,
-            ctrl_surf_tx,
             ctrl_surf_panel,
 
             midi_ports_in,
@@ -94,7 +94,7 @@ impl<'a> Controller<'a> {
             must_repaint: false,
             frame: None,
         }
-        .run_loop(req_rx, evt_rx, ctrl_surf_rx);
+        .run_loop(req_rx, evt_rx, midi_rx);
 
         Ok(())
     }
@@ -104,12 +104,20 @@ impl<'a> Controller<'a> {
 
         match request {
             Connect((direction, port_name)) => self.connect(direction, port_name)?,
-            Disconnect(direction) => self.disconnect(direction)?,
+            Disconnect(direction) => {
+                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
+                self.disconnect(direction)?;
+            }
             RefreshPorts => self.refresh_ports()?,
             UseControlSurface(ctrl_surf_name) => {
-                // FIXME try to find this ctrl surf on current ports
-                // otherwise, scan for known ctrl surf on other ports.
+                let ctrl_surf = crate::ctrl_surf::FACTORY
+                    .build(&ctrl_surf_name)
+                    .unwrap_or_else(|| panic!("Unknown Control Surface {}", ctrl_surf_name));
+
+                self.ctrl_surf = Some(ctrl_surf);
                 self.ctrl_surf_panel.lock().unwrap().cur = ctrl_surf_name;
+
+                self.start_device_identification()?;
             }
             UsePlayer(player_name) => {
                 self.players.set_cur(player_name).unwrap();
@@ -121,15 +129,9 @@ impl<'a> Controller<'a> {
             }
             RefreshPlayers => self.refresh_players()?,
             ResetPlayer => {
-                // FIXME actually reset
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
             }
-            Shutdown => {
-                // FIXME could disconnect automatically in Drop impls
-                let _ = self.disconnect(super::port::Direction::Out);
-                let _ = self.disconnect(super::port::Direction::In);
-                return Ok(ControlFlow::Break(()));
-            }
+            Shutdown => return Ok(ControlFlow::Break(())),
             HaveFrame(egui_frame) => {
                 self.frame = Some(egui_frame);
             }
@@ -149,30 +151,14 @@ impl<'a> Controller<'a> {
         use super::port::Direction;
         match direction {
             Direction::In => {
-                let ctrl_surf_name = self.ctrl_surf_panel.lock().unwrap().cur.clone();
-                let ctrl_surf = crate::ctrl_surf::FACTORY
-                    .build(&ctrl_surf_name)
-                    .unwrap_or_else(|| panic!("Unknown Control Surface {}", ctrl_surf_name));
-
-                self.ctrl_surf = Some(ctrl_surf.clone());
-
-                let ctrl_surf_tx = self.ctrl_surf_tx.clone();
-                let callback = move |msg| {
-                    let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
-                    let _ = ctrl_surf_tx.send(resp);
-                };
-                self.midi_ports_in.connect(port_name, callback)?;
-
-                if self.midi_ports_out.is_connected() {
-                    self.start_device_identification()?;
-                }
+                self.midi_ports_in.connect(port_name, |_ts, msg, midi_tx| {
+                    let _ = midi_tx.send(msg.into());
+                })?;
+                self.start_device_identification()?;
             }
             Direction::Out => {
                 self.midi_ports_out.connect(port_name)?;
-
-                if self.midi_ports_in.is_connected() {
-                    self.start_device_identification()?;
-                }
+                self.start_device_identification()?;
             }
         }
 
@@ -204,14 +190,25 @@ impl<'a> Controller<'a> {
     }
 
     fn start_device_identification(&mut self) -> Result<(), app::Error> {
+        // FIXME scan for known ctrl surf on currently selected port
+        // and other ports if identification fails.
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let resp = ctrl_surf.lock().unwrap().start_identification();
             self.handle_ctrl_surf_resp(resp)?;
 
-            // FIXME do something about this
+            // FIXME if ctrl surf was found, request data from player
         }
 
         Ok(())
+    }
+
+    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), app::Error> {
+        let resp = match self.ctrl_surf {
+            Some(ref ctrl_surf) => ctrl_surf.lock().unwrap().msg_from_device(msg),
+            None => return Ok(()),
+        };
+
+        self.handle_ctrl_surf_resp(resp)
     }
 
     fn handle_ctrl_surf_resp(&mut self, resp: ctrl_surf::Response) -> Result<(), app::Error> {
@@ -303,7 +300,7 @@ impl<'a> Controller<'a> {
         mut self,
         req_rx: channel::Receiver<app::Request>,
         evt_rx: channel::Receiver<ctrl_surf::event::Feedback>,
-        ctrl_surf_rx: channel::Receiver<ctrl_surf::Response>,
+        midi_rx: channel::Receiver<midi::Msg>,
     ) {
         loop {
             channel::select! {
@@ -338,9 +335,9 @@ impl<'a> Controller<'a> {
                         }
                     }
                 }
-                recv(ctrl_surf_rx) -> ctrl_resp => {
-                    match ctrl_resp {
-                        Ok(resp) => match self.handle_ctrl_surf_resp(resp) {
+                recv(midi_rx) -> midi_msg => {
+                    match midi_msg {
+                        Ok(midi_msg) => match self.handle_midi_msg(midi_msg) {
                             Ok(()) => (),
                             Err(err) => {
                                 log::error!("{err}");
@@ -348,7 +345,7 @@ impl<'a> Controller<'a> {
                             }
                         },
                         Err(err) => {
-                            log::error!("Error control surface event channel: {err}");
+                            log::error!("Error MIDI msg channel: {err}");
                             break;
                         }
                     }

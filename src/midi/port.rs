@@ -2,17 +2,17 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use super::io;
 
-pub type PortsIn = DirectionalPorts<midir::MidiInput, midir::MidiInputConnection<()>>;
-pub type PortsOut = DirectionalPorts<midir::MidiOutput, midir::MidiOutputConnection>;
+pub type PortsIn<D> = DirectionalPorts<midir::MidiInput, midir::MidiInputConnection<D>, D>;
+pub type PortsOut = DirectionalPorts<midir::MidiOutput, midir::MidiOutputConnection, ()>;
 
-pub struct DirectionalPorts<IO: midir::MidiIO, Conn> {
+pub struct DirectionalPorts<IO: midir::MidiIO, Conn, D> {
     map: BTreeMap<Arc<str>, IO::Port>,
     cur: Option<Arc<str>>,
-    midi_conn: io::DirectionalConnection<IO, Conn>,
+    midi_conn: io::DirectionalConnection<IO, Conn, D>,
     client_name: Arc<str>,
 }
 
-impl<IO: midir::MidiIO, Conn> DirectionalPorts<IO, Conn> {
+impl<IO: midir::MidiIO, Conn, D> DirectionalPorts<IO, Conn, D> {
     pub fn list(&self) -> impl Iterator<Item = &Arc<str>> {
         self.map.keys()
     }
@@ -46,12 +46,12 @@ impl<IO: midir::MidiIO, Conn> DirectionalPorts<IO, Conn> {
     }
 }
 
-impl PortsIn {
-    pub fn try_new(client_name: Arc<str>) -> Result<Self, super::Error> {
+impl<D: Send + Clone> PortsIn<D> {
+    pub fn try_new(client_name: Arc<str>, data: D) -> Result<Self, super::Error> {
         Ok(Self {
             map: BTreeMap::new(),
             cur: None,
-            midi_conn: io::MidiIn::try_new(&client_name)?,
+            midi_conn: io::MidiIn::<D>::try_new(&client_name, data)?,
             client_name,
         })
     }
@@ -64,9 +64,9 @@ impl PortsIn {
         Ok(())
     }
 
-    pub fn connect<C>(&mut self, port_name: Arc<str>, mut callback: C) -> Result<(), super::Error>
+    pub fn connect<C>(&mut self, port_name: Arc<str>, callback: C) -> Result<(), super::Error>
     where
-        C: FnMut(super::Msg) + Send + 'static,
+        C: FnMut(u64, &[u8], &mut D) + Send + 'static,
     {
         let port = self
             .map
@@ -75,12 +75,7 @@ impl PortsIn {
             .clone();
 
         self.midi_conn
-            .connect(
-                port_name.clone(),
-                &port,
-                &self.client_name,
-                move |_ts, buf| callback(buf.into()),
-            )
+            .connect(port_name.clone(), &port, &self.client_name, callback)
             .map_err(|_| {
                 self.cur = None;
                 super::Error::PortConnection
