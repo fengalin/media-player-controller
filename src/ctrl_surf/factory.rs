@@ -6,7 +6,7 @@ use super::imp;
 pub static FACTORY: Lazy<Arc<Factory>> =
     Lazy::new(|| Factory::default().with::<imp::XTouchOneMackie>().into());
 
-pub trait Buildable {
+pub trait Buildable: imp::ControlSurface {
     const NAME: &'static str;
 
     fn build() -> Arc<Mutex<dyn imp::ControlSurface>>;

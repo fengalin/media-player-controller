@@ -19,9 +19,10 @@ pub enum Request {
     Disconnect(super::port::Direction),
     RefreshPorts,
     UseControlSurface(Arc<str>),
+    NoControlSurface,
+    ResetControlSurface,
     UsePlayer(Arc<str>),
     RefreshPlayers,
-    ResetPlayer,
     Shutdown,
     HaveFrame(epi::Frame),
     HaveContext(egui::Context),
@@ -129,6 +130,9 @@ impl epi::App for App {
         self.req_tx.send(Request::HaveFrame(frame.clone())).unwrap();
         self.req_tx.send(Request::HaveContext(ctx.clone())).unwrap();
 
+        self.player_panel.lock().unwrap().setup(storage);
+        self.send_req(Request::RefreshPlayers);
+
         let resps = self.ports_panel.lock().unwrap().setup(storage);
         for resp in resps {
             Dispatcher::<super::PortsPanel>::handle(self, Some(resp));
@@ -139,9 +143,6 @@ impl epi::App for App {
         if let Some(resp) = resp {
             Dispatcher::<super::ControlSurfacePanel>::handle(self, Some(resp));
         }
-
-        self.player_panel.lock().unwrap().setup(storage);
-        self.send_req(Request::RefreshPlayers);
     }
 
     fn save(&mut self, storage: &mut dyn epi::Storage) {
@@ -154,7 +155,7 @@ impl epi::App for App {
 
     fn on_exit(&mut self) {
         log::info!("Exiting...");
-        self.send_req(Request::ResetPlayer);
+        self.send_req(Request::ResetControlSurface);
     }
 }
 

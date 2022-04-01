@@ -160,7 +160,38 @@ impl<'a> Players<'a> {
                     Mute => unimplemented!("Not available on mpris::Player"),
                 }
             }
-            Identification(_) => (),
+            DataRequest => self.send_all_data()?,
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a> Players<'a> {
+    pub fn send_all_data(&self) -> Result<(), Error> {
+        let player_name = match self.cur {
+            Some(ref cur) => cur.0.clone(),
+            None => return Ok(()),
+        };
+
+        let finder = mpris::PlayerFinder::new()?;
+        let player = finder.find_by_name(player_name.as_ref())?;
+
+        self.evt_tx
+            .send(ctrl_surf::event::Data::AppName(player_name).into())?;
+        self.evt_tx.send(player.get_playback_status()?.into())?;
+
+        if let Ok(vol) = player.get_volume() {
+            self.evt_tx
+                .send(ctrl_surf::event::Mixer::Volume(vol).into())?;
+        }
+
+        if let Ok(meta) = player.get_metadata() {
+            self.evt_tx.send(ctrl_surf::Track::from(meta).into())?;
+        }
+
+        if let Ok(pos) = player.get_position() {
+            self.evt_tx.send(ctrl_surf::Timecode::from(pos).into())?;
         }
 
         Ok(())
@@ -201,20 +232,7 @@ impl<'a> Players<'a> {
         let finder = mpris::PlayerFinder::new()?;
         let player = finder.find_by_name(&player_name)?;
 
-        evt_tx.send(ctrl_surf::event::Data::Player(player_name).into())?;
-        evt_tx.send(player.get_playback_status()?.into())?;
-
-        if let Ok(vol) = player.get_volume() {
-            evt_tx.send(ctrl_surf::event::Mixer::Volume(vol).into())?;
-        }
-
-        if let Ok(meta) = player.get_metadata() {
-            evt_tx.send(ctrl_surf::Track::from(meta).into())?;
-        }
-
-        if let Ok(pos) = player.get_position() {
-            evt_tx.send(ctrl_surf::Timecode::from(pos).into())?;
-        }
+        evt_tx.send(ctrl_surf::event::Feedback::NewApp(player_name))?;
 
         // events.next() is blocking...
         for event in player.events()? {

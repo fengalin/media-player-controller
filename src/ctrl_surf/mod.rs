@@ -14,5 +14,5 @@ pub use factory::{ControlSurfaceArc, FACTORY};
 mod imp;
 pub use imp::ControlSurface;
 
-pub mod response;
-pub use response::Response;
+pub mod msg;
+pub use msg::Msg;

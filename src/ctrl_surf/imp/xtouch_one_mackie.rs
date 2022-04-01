@@ -4,9 +4,9 @@ use crate::{
     ctrl_surf::{
         self,
         event::{self, *},
-        Error, Response,
+        Error, Msg,
     },
-    midi::{self, MsgList},
+    midi,
 };
 
 const MACKIE_ID: [u8; 3] = [0x00, 0x00, 0x66];
@@ -51,19 +51,22 @@ mod fader {
     pub const TOUCH_THRSD: u8 = 64;
 }
 
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
+    AwaitingDeviceId,
+    Connected,
+    Disconnected,
     Playing,
     Stopped,
-    AwaitingDeviceId,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum FaderState {
     Released,
     Touched { last_volume: Option<f64> },
 }
 
+#[derive(Debug)]
 pub struct XTouchOneMackie {
     last_tc: TimecodeBreakDown,
     chan: midi::Channel,
@@ -76,23 +79,27 @@ impl Default for XTouchOneMackie {
         Self {
             last_tc: TimecodeBreakDown::default(),
             chan: midi::Channel::default(),
-            state: State::Stopped,
+            state: State::Disconnected,
             fader_state: FaderState::Released,
         }
     }
 }
 
 impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
-    fn start_identification(&mut self) -> Response {
-        self.reset();
-        self.state = State::AwaitingDeviceId;
+    fn start_identification(&mut self) -> Vec<Msg> {
+        *self = XTouchOneMackie {
+            state: State::AwaitingDeviceId,
+            ..Default::default()
+        };
 
         log::debug!("Starting device identification");
 
-        Response::from_msg(midi::Msg::new_sysex(&IDENTIFICATION_DATA))
+        midi::Msg::new_sysex(&IDENTIFICATION_DATA)
+            .to_device()
+            .into()
     }
 
-    fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Response {
+    fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg> {
         let buf = msg.inner();
 
         if let Some(&tag_chan) = buf.first() {
@@ -105,32 +112,32 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
                         use Transport::*;
 
                         match id_value {
-                            [PREVIOUS, PRESSED] => return Response::from_event(Previous),
-                            [NEXT, PRESSED] => return Response::from_event(Next),
-                            [STOP, PRESSED] => return Response::from_event(Stop),
-                            [PLAY, PRESSED] => return Response::from_event(PlayPause),
-                            [FADER_TOUCHED, value] => return self.fader_touch(*value),
+                            [PREVIOUS, PRESSED] => return Previous.to_app().into(),
+                            [NEXT, PRESSED] => return Next.to_app().into(),
+                            [STOP, PRESSED] => return Stop.to_app().into(),
+                            [PLAY, PRESSED] => return PlayPause.to_app().into(),
+                            [FADER_TOUCHED, value] => return self.device_fader_touch(*value),
                             _ => (),
                         }
                     }
                 }
                 fader::TAG => {
                     if let Some(value) = buf.get(1..=2) {
-                        return self.fader_moved(value);
+                        return self.device_fader_moved(value);
                     }
                 }
-                midi::sysex::TAG => return self.handle_sysex_msg(msg),
+                midi::sysex::TAG => return self.device_sysex(msg),
                 _ => (),
             }
         }
 
-        Response::none()
+        Msg::none()
     }
 
-    fn event_to_device(&mut self, event: Feedback) -> Response {
+    fn event_to_device(&mut self, event: Feedback) -> Vec<Msg> {
         if self.state == State::AwaitingDeviceId {
-            log::warn!("Ignoring event while awaiting device Id");
-            return Response::none();
+            log::debug!("Ignoring event while awaiting device Id");
+            return Msg::none();
         }
 
         use Feedback::*;
@@ -138,66 +145,87 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
             Transport(event) => {
                 use event::Transport::*;
                 match event {
-                    Play => return self.play(),
-                    Pause => return self.pause(),
-                    Stop => return Response::from_msg_list(self.reset()),
+                    Play => return self.app_play(),
+                    Pause => return self.app_pause(),
+                    Stop => return self.reset(),
                     _ => (),
                 }
             }
             Mixer(mixer) => {
                 use event::Mixer::*;
                 match mixer {
-                    Volume(vol) => return self.volume(vol),
+                    Volume(vol) => return self.app_volume(vol),
                     Mute => (),
                 }
+            }
+            NewApp(app) => {
+                log::debug!("New application {app}. Reseting and requesting data");
+                let mut msg_list = self.reset();
+                msg_list.push(CtrlSurfEvent::DataRequest.into());
+
+                return msg_list;
             }
             Data(data) => {
                 use event::Data::*;
                 match data {
-                    Timecode(tc) => return self.timecode(tc),
-                    Player(player) => {
+                    Timecode(tc) => return self.app_timecode(tc),
+                    AppName(player) => {
                         log::debug!("got {}", player);
-                        return Response::from_msg_list(self.reset());
-                        // FIXME send to device
+                        // FIXME send to player name to device
                     }
                     Track(_) => (),
                 }
             }
         }
 
-        Response::none()
+        Msg::none()
     }
 
-    fn reset(&mut self) -> MsgList {
+    fn is_connected(&self) -> bool {
+        !matches!(self.state, State::AwaitingDeviceId | State::Disconnected)
+    }
+
+    fn reset(&mut self) -> Vec<Msg> {
         use button::*;
         use display_7_seg::*;
+        use State::*;
 
-        let mut list = MsgList::new();
+        let mut list = Vec::new();
 
         let tag_chan = button::TAG | self.chan;
-        list.push([tag_chan, PREVIOUS, OFF]);
-        list.push([tag_chan, NEXT, OFF]);
-        list.push([tag_chan, STOP, OFF]);
-        list.push([tag_chan, PLAY, OFF]);
+        list.push([tag_chan, PREVIOUS, OFF].into());
+        list.push([tag_chan, NEXT, OFF].into());
+        list.push([tag_chan, STOP, OFF].into());
+        list.push([tag_chan, PLAY, OFF].into());
 
         for idx in 0..10 {
-            list.push([display_7_seg::TAG.into(), TIME_LEFT_DIGIT - idx as u8, b' ']);
+            list.push([display_7_seg::TAG.into(), TIME_LEFT_DIGIT - idx as u8, b' '].into());
         }
 
-        *self = XTouchOneMackie::default();
+        let state = match self.state {
+            Connected | Playing | Stopped => Connected,
+            other => other,
+        };
+
+        *self = XTouchOneMackie {
+            state,
+            ..Default::default()
+        };
 
         list
     }
 }
 
+/// Device events.
 impl XTouchOneMackie {
-    fn build_fader_msg(&self, vol: f64) -> [u8; 3] {
+    fn build_fader_msg(&self, vol: f64) -> Msg {
         let two_bytes = midi::normalized_f64::to_be(vol).unwrap();
-        [fader::TAG | self.chan, two_bytes[0], two_bytes[1]]
+        [fader::TAG | self.chan, two_bytes[0], two_bytes[1]].into()
     }
 
-    fn fader_touch(&mut self, value: u8) -> Response {
+    fn device_fader_touch(&mut self, value: u8) -> Vec<Msg> {
         use FaderState::*;
+        use Mixer::*;
 
         let is_touched = value > fader::TOUCH_THRSD;
         match self.fader_state {
@@ -207,132 +235,142 @@ impl XTouchOneMackie {
             Touched { last_volume } if !is_touched => {
                 self.fader_state = Released;
                 if let Some(vol) = last_volume {
-                    return Response::from(Mixer::Volume(vol), self.build_fader_msg(vol));
+                    return vec![Volume(vol).to_app(), self.build_fader_msg(vol)];
                 }
             }
             _ => (),
         }
 
-        Response::none()
+        Msg::none()
     }
 
-    fn fader_moved(&mut self, buf: &[u8]) -> Response {
+    fn device_fader_moved(&mut self, buf: &[u8]) -> Vec<Msg> {
         use FaderState::*;
+        use Mixer::*;
 
         let vol = match midi::normalized_f64::from_be(buf) {
             Ok(value) => value,
             Err(err) => {
                 log::error!("Fader moved value: {err}");
-                return Response::none();
+                return Msg::none();
             }
         };
 
         match &mut self.fader_state {
             Touched { last_volume } => {
                 *last_volume = Some(vol);
-                Response::from_event(Mixer::Volume(vol))
+                Volume(vol).to_app().into()
             }
             Released => {
-                // FIXME is this a problem?
-                Response::from_event(Mixer::Volume(vol))
+                // FIXME is this a problem or even possible?
+                Volume(vol).to_app().into()
             }
         }
     }
 }
 
+/// App events.
 impl XTouchOneMackie {
-    fn play(&mut self) -> Response {
+    fn app_play(&mut self) -> Vec<Msg> {
         use button::*;
         use State::*;
 
-        let mut list = MsgList::new();
+        let mut list = Vec::new();
         let tag_chan = button::TAG | self.chan;
 
         match self.state {
-            Stopped => {
+            Connected | Stopped => {
                 self.state = Playing;
-                list.push([tag_chan, STOP, OFF]);
+                list.push([tag_chan, STOP, OFF].into());
             }
             Playing => (),
-            AwaitingDeviceId => unreachable!(),
+            AwaitingDeviceId | Disconnected => unreachable!(),
         }
 
-        list.push([tag_chan, PLAY, ON]);
+        list.push([tag_chan, PLAY, ON].into());
 
-        Response::from_msg_list(list)
+        list
     }
 
-    fn pause(&mut self) -> Response {
+    fn app_pause(&mut self) -> Vec<Msg> {
         use button::*;
         use State::*;
 
-        let mut list = MsgList::new();
+        let mut list = Vec::new();
         let tag_chan = button::TAG | self.chan;
 
         match self.state {
-            Playing => {
+            Connected | Playing => {
                 self.state = Stopped;
-                list.push([tag_chan, PLAY, OFF]);
+                list.push([tag_chan, PLAY, OFF].into());
             }
             Stopped => (),
-            AwaitingDeviceId => unreachable!(),
+            AwaitingDeviceId | Disconnected => unreachable!(),
         }
 
-        list.push([tag_chan, STOP, ON]);
+        list.push([tag_chan, STOP, ON].into());
 
-        Response::from_msg_list(list)
+        list
     }
 
-    fn volume(&mut self, vol: f64) -> Response {
+    fn app_volume(&mut self, vol: f64) -> Vec<Msg> {
         use FaderState::*;
 
         match &mut self.fader_state {
-            Released => Response::from_msg(self.build_fader_msg(vol)),
+            Released => self.build_fader_msg(vol).into(),
             Touched { last_volume } => {
                 // user touches fader => don't move it before it's released.
                 *last_volume = Some(vol);
 
-                Response::none()
+                Msg::none()
             }
         }
     }
 
-    fn timecode(&mut self, tc: ctrl_surf::Timecode) -> Response {
+    fn app_timecode(&mut self, tc: ctrl_surf::Timecode) -> Vec<Msg> {
         use display_7_seg::*;
 
-        let mut list = MsgList::new();
+        let mut list = Vec::new();
         let tc = TimecodeBreakDown::from(tc);
 
         for (idx, (&last_digit, digit)) in self.last_tc.0.iter().zip(tc.0).enumerate() {
             if last_digit != digit {
-                list.push([TAG.into(), TIME_LEFT_DIGIT - idx as u8, digit]);
+                list.push([TAG.into(), TIME_LEFT_DIGIT - idx as u8, digit].into());
             }
         }
 
         self.last_tc = tc;
 
-        Response::from_msg_list(list)
+        list
     }
 }
 
+/// Device handshake.
 impl XTouchOneMackie {
-    fn handle_sysex_msg(&mut self, msg: midi::Msg) -> Response {
+    fn device_sysex(&mut self, msg: midi::Msg) -> Vec<Msg> {
         if self.state != State::AwaitingDeviceId {
             log::debug!("Ignoring sysex message {}", msg.display());
-            return Response::none();
+            return Msg::none();
         }
 
-        let res = self.handle_identification_resp(msg);
-        Response::from_event(CtrlSurfEvent::Identification(res))
+        let res = self.device_handshake_resp(msg);
+        if res.is_err() {
+            return Msg::DeviceHandshake(res).into();
+        }
+
+        vec![
+            Msg::DeviceHandshake(Ok(())),
+            CtrlSurfEvent::DataRequest.to_app(),
+        ]
     }
 
-    fn handle_identification_resp(&mut self, msg: midi::Msg) -> Result<(), Error> {
+    fn device_handshake_resp(&mut self, msg: midi::Msg) -> Result<(), Error> {
         use crate::bytes::Displayable;
         use Error::*;
 
         self.state = State::Stopped;
 
-        let data = msg.try_get_sysex_data()?;
+        let data = msg.parse_sysex()?;
         if data.len() < 5 {
             return Err(UnexpectedDeviceResponse(msg.display().to_owned()));
         }
@@ -358,12 +396,12 @@ impl XTouchOneMackie {
             });
         }
 
-        if let Ok(data_str) = std::str::from_utf8(&data[2..]) {
-            log::debug!("Device identification success. Found: {data_str}");
-        } else {
-            let displayable = Displayable::from(&data[2..]);
-            log::debug!("Device identification success. Found: {displayable}");
-        }
+        log::debug!(
+            "Device handshake success. Found: {}",
+            Displayable::from(&data[5..]),
+        );
+
+        self.state = State::Connected;
 
         Ok(())
     }

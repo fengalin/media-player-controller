@@ -13,6 +13,9 @@ impl Dispatcher<super::ControlSurfacePanel> {
                 Use(ctrl_surf) => {
                     app.send_req(app::Request::UseControlSurface(ctrl_surf));
                 }
+                NoControlSurface => {
+                    app.send_req(app::Request::NoControlSurface);
+                }
                 Discover => {
                     todo!();
                 }

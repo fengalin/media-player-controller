@@ -4,7 +4,7 @@ pub use error::Error;
 mod io;
 
 pub mod msg;
-pub use msg::{Msg, MsgList};
+pub use msg::Msg;
 
 pub mod port;
 pub use port::{DirectionalPorts, PortsIn, PortsOut};

@@ -4,7 +4,7 @@ use std::sync::Arc;
 pub enum CtrlSurfEvent {
     Transport(Transport),
     Mixer(Mixer),
-    Identification(Result<(), super::Error>),
+    DataRequest,
 }
 
 #[derive(Debug)]
@@ -12,6 +12,7 @@ pub enum Feedback {
     Transport(Transport),
     Mixer(Mixer),
     Data(Data),
+    NewApp(Arc<str>),
 }
 
 #[derive(Debug)]
@@ -60,7 +61,7 @@ impl From<Mixer> for Feedback {
 pub enum Data {
     Track(super::Track),
     Timecode(super::Timecode),
-    Player(Arc<str>),
+    AppName(Arc<str>),
 }
 
 impl From<Data> for Feedback {

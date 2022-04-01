@@ -5,6 +5,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum Response {
     Use(Arc<str>),
+    NoControlSurface,
     Discover,
 }
 
@@ -21,9 +22,7 @@ impl ControlSurfacePanel {
         let mut list: Vec<Arc<str>> = crate::ctrl_surf::FACTORY.list().map(Arc::from).collect();
         list.sort();
 
-        // FIXME initialize with the last Control Surface used
-        // or try auto-detecting?
-        let cur = list.first().unwrap().clone();
+        let cur = NO_CTRL_SURF.clone();
 
         Self { list, cur }
     }
@@ -38,6 +37,17 @@ impl ControlSurfacePanel {
             egui::ComboBox::from_label("Control Surface")
                 .selected_text(self.cur.as_ref())
                 .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_value(
+                            &mut self.cur,
+                            NO_CTRL_SURF.clone(),
+                            NO_CTRL_SURF.as_ref(),
+                        )
+                        .clicked()
+                    {
+                        resp = Some(NoControlSurface);
+                    }
+
                     for ctrl_surf in self.list.iter() {
                         if ui
                             .selectable_value(&mut self.cur, ctrl_surf.clone(), ctrl_surf.as_ref())
@@ -63,6 +73,10 @@ impl ControlSurfacePanel {
 
         if let Some(storage) = storage {
             if let Some(ctrl_surf) = storage.get_string(STORAGE_CTRL_SURF) {
+                if ctrl_surf == NO_CTRL_SURF.as_ref() {
+                    return Some(NoControlSurface);
+                }
+
                 return Some(Use(ctrl_surf.into()));
             }
         }
@@ -71,8 +85,12 @@ impl ControlSurfacePanel {
     }
 
     pub fn save(&self, storage: &mut dyn epi::Storage) {
-        if self.cur != *NO_CTRL_SURF {
-            storage.set_string(STORAGE_CTRL_SURF, self.cur.to_string());
-        }
+        storage.set_string(STORAGE_CTRL_SURF, self.cur.to_string());
+    }
+}
+
+impl ControlSurfacePanel {
+    pub fn update(&mut self, ctrl_surf: impl Into<Option<Arc<str>>>) {
+        self.cur = ctrl_surf.into().unwrap_or_else(|| NO_CTRL_SURF.clone());
     }
 }

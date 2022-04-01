@@ -115,9 +115,16 @@ impl<'a> Controller<'a> {
                     .unwrap_or_else(|| panic!("Unknown Control Surface {}", ctrl_surf_name));
 
                 self.ctrl_surf = Some(ctrl_surf);
-                self.ctrl_surf_panel.lock().unwrap().cur = ctrl_surf_name;
+                self.ctrl_surf_panel.lock().unwrap().update(ctrl_surf_name);
 
                 self.start_device_identification()?;
+            }
+            NoControlSurface => {
+                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
+                self.ctrl_surf = None;
+            }
+            ResetControlSurface => {
+                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
             }
             UsePlayer(player_name) => {
                 self.players.set_cur(player_name).unwrap();
@@ -128,9 +135,6 @@ impl<'a> Controller<'a> {
                 }
             }
             RefreshPlayers => self.refresh_players()?,
-            ResetPlayer => {
-                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
-            }
             Shutdown => return Ok(ControlFlow::Break(())),
             HaveFrame(egui_frame) => {
                 self.frame = Some(egui_frame);
@@ -195,52 +199,55 @@ impl<'a> Controller<'a> {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let resp = ctrl_surf.lock().unwrap().start_identification();
             self.handle_ctrl_surf_resp(resp)?;
-
-            // FIXME if ctrl surf was found, request data from player
         }
 
         Ok(())
     }
 
     fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), app::Error> {
-        let resp = match self.ctrl_surf {
-            Some(ref ctrl_surf) => ctrl_surf.lock().unwrap().msg_from_device(msg),
-            None => return Ok(()),
-        };
-
-        self.handle_ctrl_surf_resp(resp)
+        match self.ctrl_surf {
+            Some(ref ctrl_surf) => {
+                let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
+                self.handle_ctrl_surf_resp(resp)
+            }
+            None => Ok(()),
+        }
     }
 
-    fn handle_ctrl_surf_resp(&mut self, resp: ctrl_surf::Response) -> Result<(), app::Error> {
-        use CtrlSurfEvent::*;
+    fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> Result<(), app::Error> {
+        use ctrl_surf::Msg::*;
 
-        let (event, msg_list) = resp.into_inner();
+        for msg in resp {
+            match msg {
+                ToApp(event) => {
+                    use CtrlSurfEvent::*;
 
-        if let Some(event) = event {
-            log::debug!("Ctrl surf: {event:?}");
-
-            match event {
-                Transport(_) => self.players.handle_event(event)?,
-                Mixer(ref mixer) => {
-                    use ctrl_surf::event::Mixer::*;
-                    match mixer {
-                        Volume(_) => self.players.handle_event(event)?,
-                        Mute => log::warn!("Attempt to mute (unimplemented)"),
+                    log::debug!("Ctrl surf: {event:?}");
+                    match event {
+                        Transport(_) => self.players.handle_event(event)?,
+                        Mixer(ref mixer) => {
+                            use ctrl_surf::event::Mixer::*;
+                            match mixer {
+                                Volume(_) => self.players.handle_event(event)?,
+                                Mute => log::warn!("Attempt to mute (unimplemented)"),
+                            }
+                        }
+                        DataRequest => self.players.handle_event(event)?,
                     }
                 }
-                Identification(res) => {
-                    if let Err(err) = res {
-                        log::debug!("Ctrl surf device identification: {err}");
-                    } else {
-                        log::info!("Ctrl surf device identification success");
+                ToDevice(msg) => {
+                    if self.midi_ports_out.is_connected() {
+                        let _ = self.midi_ports_out.send(&msg);
                     }
                 }
-            }
-        }
-
-        if self.midi_ports_out.is_connected() {
-            for msg in msg_list {
-                let _ = self.midi_ports_out.send(&msg);
+                DeviceHandshake(res) => match res {
+                    Ok(()) => {
+                        log::info!("Ctrl surf device handshake success");
+                    }
+                    Err(err) => {
+                        log::debug!("Ctrl surf device handshake: {err}");
+                    }
+                },
             }
         }
 
@@ -249,7 +256,13 @@ impl<'a> Controller<'a> {
 
     fn feed_ctrl_surf_back(&mut self, event: impl Into<ctrl_surf::event::Feedback>) {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
-            let resp = ctrl_surf.lock().unwrap().event_to_device(event.into());
+            let resp = {
+                let mut ctrl_surf = ctrl_surf.lock().unwrap();
+                if !ctrl_surf.is_connected() {
+                    return;
+                }
+                ctrl_surf.event_to_device(event.into())
+            };
 
             let _ = self.handle_ctrl_surf_resp(resp);
         }
@@ -276,6 +289,18 @@ impl<'a> Controller<'a> {
                 self.player_panel.lock().unwrap().update_position(tc);
                 self.feed_ctrl_surf_back(event);
                 self.must_repaint = true;
+            }
+            NewApp(_) => {
+                log::trace!("Player: {event:?}");
+                let is_connected = self
+                    .ctrl_surf
+                    .as_ref()
+                    .map_or(false, |cs| cs.lock().unwrap().is_connected());
+                if !is_connected {
+                    self.players.send_all_data()?;
+                } else {
+                    self.feed_ctrl_surf_back(event);
+                }
             }
             _ => {
                 log::debug!("Player: {event:?}");
