@@ -1,11 +1,11 @@
-use super::{app, App};
+use super::{app, ctrl_surf, player, port, App};
 
 pub struct Dispatcher<T>(std::marker::PhantomData<*const T>);
 
 impl Dispatcher<super::ControlSurfacePanel> {
-    pub fn handle(app: &mut App, resp: Option<super::ctrl_surf::Response>) {
+    pub fn handle(app: &mut App, resp: Option<ctrl_surf::Response>) {
         if let Some(resp) = resp {
-            use super::ctrl_surf::Response::*;
+            use ctrl_surf::Response::*;
 
             app.clear_last_err();
 
@@ -25,9 +25,9 @@ impl Dispatcher<super::ControlSurfacePanel> {
 }
 
 impl Dispatcher<super::PortsPanel> {
-    pub fn handle(app: &mut App, resp: Option<super::port::Response>) {
+    pub fn handle(app: &mut App, resp: Option<port::Response>) {
         if let Some(resp) = resp {
-            use super::port::Response::*;
+            use port::Response::*;
 
             app.clear_last_err();
             app.send_req(app::Request::RefreshPorts);
@@ -46,9 +46,9 @@ impl Dispatcher<super::PortsPanel> {
 }
 
 impl Dispatcher<super::PlayerPanel> {
-    pub fn handle(app: &mut App, resp: Option<super::mpris::Response>) {
+    pub fn handle(app: &mut App, resp: Option<player::Response>) {
         if let Some(resp) = resp {
-            use super::mpris::Response::*;
+            use player::Response::*;
 
             app.clear_last_err();
             app.send_req(app::Request::RefreshPlayers);

@@ -320,18 +320,12 @@ impl From<mpris::Metadata> for ctrl_surf::Track {
             .artists()
             .and_then(|artists| artists.first().map(|artist| Arc::from(*artist)));
 
-        let image = meta.art_url().as_ref().and_then(|image_url| {
-            let image_path = image_url.trim_start_matches("file://");
-            image::io::Reader::open(image_path)
-                .map_err(|_| ())
-                .and_then(|reader| reader.decode().map_err(|_| ()).map(Arc::from))
-                .ok()
-        });
+        let image_url = meta.art_url().map(Arc::from);
 
         ctrl_surf::Track {
             artist,
             title: meta.title().map(Arc::from),
-            image,
+            image_url,
         }
     }
 }

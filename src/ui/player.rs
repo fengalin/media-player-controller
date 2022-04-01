@@ -18,7 +18,7 @@ pub struct PlayerPanel {
     artist: Option<Arc<str>>,
     title: Option<Arc<str>>,
     position: Option<String>,
-    texture: Option<egui::TextureHandle>,
+    texture: Option<(Arc<str>, egui::TextureHandle)>,
     egui_ctx: Option<egui::Context>,
 }
 
@@ -58,7 +58,7 @@ impl PlayerPanel {
 
             ui.add_space(20f32);
             ui.horizontal(|ui| {
-                if let Some(ref texture) = self.texture {
+                if let Some((_, ref texture)) = self.texture {
                     let av_size = ui.available_size();
                     let img_size = texture.size_vec2();
 
@@ -140,18 +140,39 @@ impl PlayerPanel {
         self.artist = track.artist.clone();
         self.title = track.title.clone();
 
-        self.texture = track
-            .image
-            .as_ref()
-            .zip(self.egui_ctx.as_ref())
-            .map(|(image, ctx)| {
-                let size = [image.width() as _, image.height() as _];
-                let image_buffer = image.to_rgba8();
-                let pixels = image_buffer.as_flat_samples();
-                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+        if let Some(ref url) = track.image_url {
+            if self.texture.as_ref().map_or(true, |(cur, _)| cur != url) {
+                if let Some(ref ctx) = self.egui_ctx {
+                    let path = url.trim_start_matches("file://");
+                    let res = image::io::Reader::open(path)
+                        .map_err(|err| {
+                            log::warn!("Failed to read image: {err}");
+                        })
+                        .and_then(|reader| {
+                            reader.decode().map_err(|err| {
+                                log::warn!("Failed to decode image: {err}");
+                            })
+                        });
 
-                ctx.load_texture("my-image", color_image)
-            });
+                    let image = match res {
+                        Ok(image) => image,
+                        Err(()) => {
+                            self.texture = None;
+                            return;
+                        }
+                    };
+
+                    let size = [image.width() as _, image.height() as _];
+                    let image_buffer = image.to_rgba8();
+                    let pixels = image_buffer.as_flat_samples();
+                    let color_image =
+                        egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+
+                    self.texture =
+                        Some((url.clone(), ctx.load_texture("track-image", color_image)));
+                }
+            }
+        }
     }
 
     pub fn update_position(&mut self, tc: ctrl_surf::Timecode) {

@@ -209,6 +209,7 @@ impl<'a> Controller<'a> {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             if !self.midi_ports_out.is_connected() || !self.midi_ports_in.is_connected() {
                 log::warn!("Need both MIDI ports connected for Control Surface identification");
+                return Ok(());
             }
 
             let resp = ctrl_surf.lock().unwrap().start_identification();

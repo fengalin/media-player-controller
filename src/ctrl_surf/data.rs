@@ -4,7 +4,7 @@ use std::{fmt, io::Write, sync::Arc};
 pub struct Track {
     pub artist: Option<Arc<str>>,
     pub title: Option<Arc<str>>,
-    pub image: Option<Arc<image::DynamicImage>>,
+    pub image_url: Option<Arc<str>>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
