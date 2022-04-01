@@ -1,5 +1,5 @@
-mod xtouch_one_mackie;
-pub use xtouch_one_mackie::XTouchOneMackie;
+mod mackie;
+pub use mackie::Mackie;
 
 pub trait ControlSurface: Send + 'static {
     fn start_identification(&mut self) -> Vec<super::Msg>;

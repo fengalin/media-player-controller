@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use super::app;
+use super::app::{self, Error};
 use crate::{
     ctrl_surf::{self, event::CtrlSurfEvent},
     midi, mpris,
@@ -13,7 +13,7 @@ use crate::{
 
 pub struct Spawner {
     pub req_rx: channel::Receiver<app::Request>,
-    pub err_tx: channel::Sender<app::Error>,
+    pub err_tx: channel::Sender<Error>,
     pub ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
     pub client_name: Arc<str>,
     pub ports_panel: Arc<Mutex<super::PortsPanel>>,
@@ -36,7 +36,7 @@ impl Spawner {
 }
 
 struct Controller<'a> {
-    err_tx: channel::Sender<app::Error>,
+    err_tx: channel::Sender<Error>,
 
     ctrl_surf: Option<ctrl_surf::ControlSurfaceArc>,
     ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
@@ -57,7 +57,7 @@ struct Controller<'a> {
 impl<'a> Controller<'a> {
     fn run(
         req_rx: channel::Receiver<app::Request>,
-        err_tx: channel::Sender<app::Error>,
+        err_tx: channel::Sender<Error>,
         ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
         client_name: Arc<str>,
         ports_panel: Arc<Mutex<super::PortsPanel>>,
@@ -99,29 +99,21 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn handle_request(&mut self, request: app::Request) -> Result<ControlFlow<(), ()>, app::Error> {
+    fn handle_request(&mut self, request: app::Request) -> Result<ControlFlow<(), ()>, Error> {
         use app::Request::*;
 
         match request {
-            Connect((direction, port_name)) => self.connect(direction, port_name)?,
+            Connect((direction, port_name)) => self.connect_port(direction, port_name)?,
             Disconnect(direction) => {
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
-                self.disconnect(direction)?;
+                self.disconnect_port(direction)?;
             }
             RefreshPorts => self.refresh_ports()?,
-            UseControlSurface(ctrl_surf_name) => {
-                let ctrl_surf = crate::ctrl_surf::FACTORY
-                    .build(&ctrl_surf_name)
-                    .unwrap_or_else(|| panic!("Unknown Control Surface {}", ctrl_surf_name));
-
-                self.ctrl_surf = Some(ctrl_surf);
-                self.ctrl_surf_panel.lock().unwrap().update(ctrl_surf_name);
-
-                self.start_device_identification()?;
-            }
+            UseControlSurface(ctrl_surf) => self.use_ctrl_surf(ctrl_surf)?,
             NoControlSurface => {
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
                 self.ctrl_surf = None;
+                log::info!("Control Surface not used");
             }
             ResetControlSurface => {
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
@@ -147,22 +139,22 @@ impl<'a> Controller<'a> {
         Ok(ControlFlow::Continue(()))
     }
 
-    fn connect(
+    fn connect_port(
         &mut self,
         direction: super::port::Direction,
         port_name: Arc<str>,
-    ) -> Result<(), app::Error> {
+    ) -> Result<(), Error> {
         use super::port::Direction;
         match direction {
             Direction::In => {
                 self.midi_ports_in.connect(port_name, |_ts, msg, midi_tx| {
                     let _ = midi_tx.send(msg.into());
                 })?;
-                self.start_device_identification()?;
+                self.try_ctrl_surf_identification()?;
             }
             Direction::Out => {
                 self.midi_ports_out.connect(port_name)?;
-                self.start_device_identification()?;
+                self.try_ctrl_surf_identification()?;
             }
         }
 
@@ -171,7 +163,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn disconnect(&mut self, direction: super::port::Direction) -> Result<(), app::Error> {
+    fn disconnect_port(&mut self, direction: super::port::Direction) -> Result<(), Error> {
         use super::port::Direction::*;
         match direction {
             In => self.midi_ports_in.disconnect(),
@@ -182,7 +174,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn refresh_ports(&mut self) -> Result<(), app::Error> {
+    fn refresh_ports(&mut self) -> Result<(), Error> {
         self.midi_ports_in.refresh()?;
         self.midi_ports_out.refresh()?;
         self.ports_panel
@@ -193,10 +185,32 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn start_device_identification(&mut self) -> Result<(), app::Error> {
+    fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> Result<(), Error> {
+        let ctrl_surf = crate::ctrl_surf::FACTORY
+            .build(&ctrl_surf_name)
+            .ok_or_else(|| {
+                self.ctrl_surf = None;
+                self.ctrl_surf_panel.lock().unwrap().update(None);
+
+                Error::UnknownControlSurface(ctrl_surf_name.clone())
+            })?;
+
+        self.ctrl_surf = Some(ctrl_surf);
+        self.ctrl_surf_panel.lock().unwrap().update(ctrl_surf_name);
+
+        self.try_ctrl_surf_identification()?;
+
+        Ok(())
+    }
+
+    fn try_ctrl_surf_identification(&mut self) -> Result<(), Error> {
         // FIXME scan for known ctrl surf on currently selected port
         // and other ports if identification fails.
         if let Some(ref ctrl_surf) = self.ctrl_surf {
+            if !self.midi_ports_out.is_connected() || !self.midi_ports_in.is_connected() {
+                log::warn!("Need both MIDI ports connected for Control Surface identification");
+            }
+
             let resp = ctrl_surf.lock().unwrap().start_identification();
             self.handle_ctrl_surf_resp(resp)?;
         }
@@ -204,7 +218,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), app::Error> {
+    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), Error> {
         match self.ctrl_surf {
             Some(ref ctrl_surf) => {
                 let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
@@ -214,7 +228,7 @@ impl<'a> Controller<'a> {
         }
     }
 
-    fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> Result<(), app::Error> {
+    fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> Result<(), Error> {
         use ctrl_surf::Msg::*;
 
         for msg in resp {
@@ -268,7 +282,7 @@ impl<'a> Controller<'a> {
         }
     }
 
-    fn handle_player_event(&mut self, event: ctrl_surf::event::Feedback) -> Result<(), app::Error> {
+    fn handle_player_event(&mut self, event: ctrl_surf::event::Feedback) -> Result<(), Error> {
         use ctrl_surf::event::{Data::*, Feedback::*, Transport::Stop};
 
         match event {
@@ -311,7 +325,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn refresh_players(&mut self) -> Result<(), app::Error> {
+    fn refresh_players(&mut self) -> Result<(), Error> {
         self.players.refresh()?;
         self.player_panel
             .lock()

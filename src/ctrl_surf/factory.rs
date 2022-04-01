@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use super::imp;
 
 pub static FACTORY: Lazy<Arc<Factory>> =
-    Lazy::new(|| Factory::default().with::<imp::XTouchOneMackie>().into());
+    Lazy::new(|| Factory::default().with::<imp::Mackie>().into());
 
 pub trait Buildable: imp::ControlSurface {
     const NAME: &'static str;

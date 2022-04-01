@@ -7,6 +7,9 @@ use crate::{midi, mpris};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Uknwown Control Surface: {}", .0)]
+    UnknownControlSurface(Arc<str>),
+
     #[error("MIDI error: {}", .0)]
     Midi(#[from] midi::Error),
 

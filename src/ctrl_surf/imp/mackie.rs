@@ -67,14 +67,14 @@ enum FaderState {
 }
 
 #[derive(Debug)]
-pub struct XTouchOneMackie {
+pub struct Mackie {
     last_tc: TimecodeBreakDown,
     chan: midi::Channel,
     state: State,
     fader_state: FaderState,
 }
 
-impl Default for XTouchOneMackie {
+impl Default for Mackie {
     fn default() -> Self {
         Self {
             last_tc: TimecodeBreakDown::default(),
@@ -85,9 +85,9 @@ impl Default for XTouchOneMackie {
     }
 }
 
-impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
+impl crate::ctrl_surf::ControlSurface for Mackie {
     fn start_identification(&mut self) -> Vec<Msg> {
-        *self = XTouchOneMackie {
+        *self = Mackie {
             state: State::AwaitingDeviceId,
             ..Default::default()
         };
@@ -207,7 +207,7 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
             other => other,
         };
 
-        *self = XTouchOneMackie {
+        *self = Mackie {
             state,
             ..Default::default()
         };
@@ -217,7 +217,7 @@ impl crate::ctrl_surf::ControlSurface for XTouchOneMackie {
 }
 
 /// Device events.
-impl XTouchOneMackie {
+impl Mackie {
     fn build_fader_msg(&self, vol: f64) -> Msg {
         let two_bytes = midi::normalized_f64::to_be(vol).unwrap();
         [fader::TAG | self.chan, two_bytes[0], two_bytes[1]].into()
@@ -270,7 +270,7 @@ impl XTouchOneMackie {
 }
 
 /// App events.
-impl XTouchOneMackie {
+impl Mackie {
     fn app_play(&mut self) -> Vec<Msg> {
         use button::*;
         use State::*;
@@ -346,7 +346,7 @@ impl XTouchOneMackie {
 }
 
 /// Device handshake.
-impl XTouchOneMackie {
+impl Mackie {
     fn device_sysex(&mut self, msg: midi::Msg) -> Vec<Msg> {
         if self.state != State::AwaitingDeviceId {
             log::debug!("Ignoring sysex message {}", msg.display());
@@ -407,8 +407,8 @@ impl XTouchOneMackie {
     }
 }
 
-impl crate::ctrl_surf::Buildable for XTouchOneMackie {
-    const NAME: &'static str = "X-Touch One (Makie mode)";
+impl crate::ctrl_surf::Buildable for Mackie {
+    const NAME: &'static str = "Mackie";
 
     fn build() -> crate::ctrl_surf::ControlSurfaceArc {
         Arc::new(Mutex::new(Self::default()))
