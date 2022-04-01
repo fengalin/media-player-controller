@@ -254,14 +254,18 @@ impl<'a> Controller<'a> {
                         let _ = self.midi_ports_out.send(&msg);
                     }
                 }
-                DeviceHandshake(res) => match res {
-                    Ok(()) => {
-                        log::info!("Ctrl surf device handshake success");
+                ConnectionStatus(res) => {
+                    use ctrl_surf::msg::ConnectionStatus::*;
+                    match res {
+                        InProgress => (),
+                        Result(Ok(())) => {
+                            log::info!("Ctrl surf device handshake success");
+                        }
+                        Result(Err(err)) => {
+                            log::debug!("Ctrl surf device handshake: {err}");
+                        }
                     }
-                    Err(err) => {
-                        log::debug!("Ctrl surf device handshake: {err}");
-                    }
-                },
+                }
             }
         }
 

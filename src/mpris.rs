@@ -263,6 +263,7 @@ impl<'a> Players<'a> {
 
             let tick = progress.tick();
             if tick.player_quit {
+                let _ = evt_tx.send(ctrl_surf::event::Transport::Stop.into());
                 break;
             }
 
