@@ -1,5 +1,3 @@
-use std::sync::{Arc, Mutex};
-
 use crate::{
     ctrl_surf::{
         self,
@@ -11,9 +9,6 @@ use crate::{
 
 mod connection {
     pub const MACKIE_ID: [u8; 3] = [0x00, 0x00, 0x66];
-
-    pub const XTOUCH_ID: u8 = 0x14;
-    //pub const XTOUCH_EXT_ID: u8 = 0x15;
 
     pub const LOGIC_CONTROL_ID: u8 = 0x10;
     pub const LOGIC_CONTROL_EXT_ID: u8 = 0x11;
@@ -85,24 +80,21 @@ enum FaderState {
 
 #[derive(Debug)]
 pub struct Mackie {
+    device_id: u8,
     last_tc: TimecodeBreakDown,
     chan: midi::Channel,
     state: State,
     fader_state: FaderState,
-
-    // FIXME maintain a set of the device ids received
-    // so that we can reset / disconnect all of them..
-    device_id: Option<u8>,
 }
 
-impl Default for Mackie {
-    fn default() -> Self {
+impl Mackie {
+    pub fn new(device_id: u8) -> Self {
         Self {
+            device_id,
             last_tc: TimecodeBreakDown::default(),
             chan: midi::Channel::default(),
             state: State::Disconnected,
             fader_state: FaderState::Released,
-            device_id: None,
         }
     }
 }
@@ -111,17 +103,17 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
     fn start_identification(&mut self) -> Vec<Msg> {
         use connection::*;
 
-        log::debug!("Starting device identification");
+        log::debug!("Starting device {:#02x} identification", self.device_id);
 
         *self = Mackie {
             state: State::Connecting(ConnectionStatus::DeviceQueried),
-            ..Default::default()
+            ..*self
         };
 
-        // need a way to specify which device we want to query.
-        midi::Msg::new_sysex(&Self::payload_for(XTOUCH_ID, QUERY_DEVICE))
-            .to_device()
-            .into()
+        vec![
+            midi::Msg::new_sysex(&self.payload_for(QUERY_DEVICE)).to_device(),
+            Msg::connetion_in_progress(),
+        ]
     }
 
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg> {
@@ -235,10 +227,7 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
             other => other,
         };
 
-        *self = Self {
-            state,
-            ..Default::default()
-        };
+        *self = Self { state, ..*self };
 
         list
     }
@@ -399,38 +388,38 @@ impl Mackie {
             });
         }
 
-        let device_id = payload[3];
+        if self.device_id != payload[3] {
+            let err = DeviceIdMismatch {
+                expected: self.device_id,
+                found: payload[3],
+            };
+            log::debug!("{err}");
+            return Err(err);
+        }
 
         let msg_list = match (payload[4], payload.get(5..)) {
             (QUERY_HOST, Some(serial_challenge)) => self
-                .device_query_host(device_id, serial_challenge)
+                .device_query_host(serial_challenge)
                 .map_err(|_| UnexpectedDeviceMsg(msg.display().to_owned()))?,
-            (DEVICE_OK, Some(_serial)) => self.device_connected(device_id),
+            (DEVICE_OK, Some(_serial)) => self.device_connected(),
             (DEVICE_ERR, Some(_serial)) => {
                 self.state = State::Disconnected;
-                log::error!("Device connection failed");
-                return Err(ConnectionError);
+                let err = ConnectionError;
+                log::error!("{err}");
+                return Err(err);
             }
-            (QUERY_DEVICE, _) => {
+            _ => {
                 self.state = State::Disconnected;
-                log::error!("Device sent QUERY DEVICE");
-                return Err(UnexpectedDeviceMsg(msg.display().to_owned()));
-            }
-            (msg_id, _) => {
-                self.state = State::Disconnected;
-                log::error!("Device sent unexpected msg {msg_id:02x}");
-                return Err(UnexpectedDeviceMsg(msg.display().to_owned()));
+                let err = UnexpectedDeviceMsg(msg.display().to_owned());
+                log::error!("{err}");
+                return Err(err);
             }
         };
 
         Ok(msg_list)
     }
 
-    fn device_query_host(
-        &mut self,
-        device_id: u8,
-        serial_challenge: &[u8],
-    ) -> Result<Vec<Msg>, ()> {
+    fn device_query_host(&mut self, serial_challenge: &[u8]) -> Result<Vec<Msg>, ()> {
         use connection::*;
 
         let (ser, chlg) = serial_challenge
@@ -441,35 +430,35 @@ impl Mackie {
                 log::error!("Device QUERY HOST: invalid serial / challenge");
             })?;
 
-        let msg_list = if device_id == LOGIC_CONTROL_ID || device_id == LOGIC_CONTROL_EXT_ID {
-            let mut resp = [0u8; 5 + 7 + 4];
+        let msg_list =
+            if self.device_id == LOGIC_CONTROL_ID || self.device_id == LOGIC_CONTROL_EXT_ID {
+                let mut resp = [0u8; 5 + 7 + 4];
 
-            Self::prepare_payload(&mut resp, device_id, HOST_REPLY);
-            resp[5..12].copy_from_slice(ser);
-            resp[12] = 0x7F & (chlg[0] + (chlg[1] ^ 0x0a) - chlg[3]);
-            resp[13] = 0x7F & ((chlg[2] >> 4) ^ (chlg[0] + chlg[3]));
-            resp[14] = 0x7F & ((chlg[3] - (chlg[2] << 2)) ^ (chlg[0] | chlg[1]));
-            resp[15] = 0x7F & (chlg[1] - chlg[2] + (0xf0 ^ (chlg[3] << 4)));
+                self.prepare_payload(&mut resp, HOST_REPLY);
+                resp[5..12].copy_from_slice(ser);
+                resp[12] = 0x7F & (chlg[0] + (chlg[1] ^ 0x0a) - chlg[3]);
+                resp[13] = 0x7F & ((chlg[2] >> 4) ^ (chlg[0] + chlg[3]));
+                resp[14] = 0x7F & ((chlg[3] - (chlg[2] << 2)) ^ (chlg[0] | chlg[1]));
+                resp[15] = 0x7F & (chlg[1] - chlg[2] + (0xf0 ^ (chlg[3] << 4)));
 
-            self.state = State::Connecting(ConnectionStatus::ChallengeReplied);
-            log::debug!("Device QUERY HOST challenge replied");
+                self.state = State::Connecting(ConnectionStatus::ChallengeReplied);
+                log::debug!("Device QUERY HOST challenge replied");
 
-            vec![
-                midi::Msg::new_sysex(&resp).to_device(),
-                Msg::connetion_in_progress(),
-            ]
-        } else {
-            // No need for a challenge reply
-            self.device_connected(device_id)
-        };
+                vec![
+                    midi::Msg::new_sysex(&resp).to_device(),
+                    Msg::connetion_in_progress(),
+                ]
+            } else {
+                // No need for a challenge reply
+                self.device_connected()
+            };
 
         Ok(msg_list)
     }
 
-    fn device_connected(&mut self, device_id: u8) -> Vec<Msg> {
-        self.device_id = Some(device_id);
+    fn device_connected(&mut self) -> Vec<Msg> {
         self.state = State::Connected;
-        log::debug!("Device connected");
+        log::debug!("Connected to device {:#02x}", self.device_id);
 
         vec![
             Msg::from_connection_result(Ok(())),
@@ -477,29 +466,21 @@ impl Mackie {
         ]
     }
 
-    fn payload_for(device_id: u8, req_id: u8) -> [u8; 5] {
+    fn payload_for(&self, req_id: u8) -> [u8; 5] {
         let mut payload = [0u8; 5];
-        Self::prepare_payload(&mut payload, device_id, req_id);
+        self.prepare_payload(&mut payload, req_id);
 
         payload
     }
 
-    fn prepare_payload(payload: &mut [u8], device_id: u8, req_id: u8) {
+    fn prepare_payload(&self, payload: &mut [u8], req_id: u8) {
         payload[..=2].copy_from_slice(&connection::MACKIE_ID);
-        payload[3] = device_id;
+        payload[3] = self.device_id;
         payload[4] = req_id;
     }
 }
 
-impl crate::ctrl_surf::Buildable for Mackie {
-    const NAME: &'static str = "Mackie";
-
-    fn build() -> crate::ctrl_surf::ControlSurfaceArc {
-        Arc::new(Mutex::new(Self::default()))
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct TimecodeBreakDown([u8; 10]);
 
 impl Default for TimecodeBreakDown {

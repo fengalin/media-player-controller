@@ -14,6 +14,9 @@ pub enum Error {
         found: bytes::Displayable<'static>,
     },
 
+    #[error("Device id mismatch expected {expected}, found {found}")]
+    DeviceIdMismatch { expected: u8, found: u8 },
+
     #[error("Device reported connection error")]
     ConnectionError,
 }

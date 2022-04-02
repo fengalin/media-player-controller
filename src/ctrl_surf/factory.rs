@@ -1,18 +1,22 @@
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 
-use super::imp;
+use super::{device, ControlSurface};
 
-pub static FACTORY: Lazy<Arc<Factory>> =
-    Lazy::new(|| Factory::default().with::<imp::Mackie>().into());
+pub static FACTORY: Lazy<Arc<Factory>> = Lazy::new(|| {
+    Factory::default()
+        .with::<device::XTouchMackie>()
+        .with::<device::XTouchExtMackie>()
+        .into()
+});
 
-pub trait Buildable: imp::ControlSurface {
+pub trait Buildable {
     const NAME: &'static str;
 
-    fn build() -> Arc<Mutex<dyn imp::ControlSurface>>;
+    fn build() -> Arc<Mutex<dyn ControlSurface>>;
 }
 
-pub type ControlSurfaceArc = Arc<Mutex<dyn imp::ControlSurface>>;
+pub type ControlSurfaceArc = Arc<Mutex<dyn ControlSurface>>;
 
 #[derive(Default)]
 pub struct Factory(std::collections::BTreeMap<&'static str, fn() -> ControlSurfaceArc>);

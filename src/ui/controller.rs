@@ -212,6 +212,10 @@ impl<'a> Controller<'a> {
                 return Ok(());
             }
 
+            log::info!(
+                "Trying to connect to Control Surface {}",
+                self.ctrl_surf_panel.lock().unwrap().cur
+            );
             let resp = ctrl_surf.lock().unwrap().start_identification();
             self.handle_ctrl_surf_resp(resp)?;
         }
@@ -258,12 +262,20 @@ impl<'a> Controller<'a> {
                 ConnectionStatus(res) => {
                     use ctrl_surf::msg::ConnectionStatus::*;
                     match res {
-                        InProgress => (),
+                        InProgress => {
+                            log::debug!(
+                                "Waiting for connection to Control Surface {}",
+                                self.ctrl_surf_panel.lock().unwrap().cur
+                            );
+                        }
                         Result(Ok(())) => {
-                            log::info!("Ctrl surf device handshake success");
+                            log::info!(
+                                "Connected to Control Surface {}",
+                                self.ctrl_surf_panel.lock().unwrap().cur
+                            );
                         }
                         Result(Err(err)) => {
-                            log::debug!("Ctrl surf device handshake: {err}");
+                            log::debug!("Control Surface connection: {err}");
                         }
                     }
                 }
