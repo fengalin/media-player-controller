@@ -177,8 +177,6 @@ impl<'a> Players<'a> {
         let finder = mpris::PlayerFinder::new()?;
         let player = finder.find_by_name(player_name.as_ref())?;
 
-        self.evt_tx
-            .send(ctrl_surf::event::Data::AppName(player_name).into())?;
         self.evt_tx.send(player.get_playback_status()?.into())?;
 
         if let Ok(vol) = player.get_volume() {

@@ -3,7 +3,7 @@ use eframe::epi;
 use std::{
     ops::ControlFlow,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use super::app::{self, Error};
@@ -13,19 +13,6 @@ use crate::{
 };
 
 const CTRL_SURF_CONNECTION_TIMEOUT: Duration = Duration::from_millis(250);
-
-enum PendingAction {
-    CtrlSurfScanSame {
-        iter: Box<dyn Iterator<Item = Arc<str>>>,
-    },
-    CtrlSurfScanDistinct {
-        // FIXME probably need cur
-        // and decide which direction to use first.
-        in_iter: Box<dyn Iterator<Item = Arc<str>>>,
-        out_iter: Box<dyn Iterator<Item = Arc<str>>>,
-    },
-    None,
-}
 
 pub struct Spawner {
     pub req_rx: channel::Receiver<app::Request>,
@@ -51,12 +38,20 @@ impl Spawner {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum DelayedEvent {
+    CtrlSurfConnectionTimeout,
+}
+
 struct Controller<'a> {
     err_tx: channel::Sender<Error>,
-    waker: channel::Receiver<Instant>,
+
+    timer: timer::Timer,
+    delayed_evt_tx: channel::Sender<DelayedEvent>,
 
     ctrl_surf: Option<ctrl_surf::ControlSurfaceArc>,
     ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
+    ctrl_surf_conn_timeout: Option<timer::Guard>,
 
     midi_ports: midi::port::InOutManager,
     ports_panel: Arc<Mutex<super::PortsPanel>>,
@@ -66,8 +61,6 @@ struct Controller<'a> {
 
     must_repaint: bool,
     frame: Option<epi::Frame>,
-
-    pending_action: PendingAction,
 }
 
 // Important: panels Mutexes must be released as soon as possible.
@@ -81,8 +74,9 @@ impl<'a> Controller<'a> {
         ports_panel: Arc<Mutex<super::PortsPanel>>,
         player_panel: Arc<Mutex<super::PlayerPanel>>,
     ) -> Result<(), ()> {
-        let (midi_tx, midi_rx) = channel::unbounded();
+        let (delayed_evt_tx, delayed_evt_rx) = channel::unbounded();
 
+        let (midi_tx, midi_rx) = channel::unbounded();
         let midi_ports =
             midi::port::InOutManager::try_new(client_name, midi_tx).map_err(|err| {
                 log::error!("Error MIDI ports manager: {}", err);
@@ -93,10 +87,13 @@ impl<'a> Controller<'a> {
 
         Self {
             err_tx,
-            waker: channel::after(Duration::ZERO),
+
+            timer: timer::Timer::new(),
+            delayed_evt_tx,
 
             ctrl_surf: None,
             ctrl_surf_panel,
+            ctrl_surf_conn_timeout: None,
 
             midi_ports,
 
@@ -106,12 +103,19 @@ impl<'a> Controller<'a> {
 
             must_repaint: false,
             frame: None,
-
-            pending_action: PendingAction::None,
         }
-        .run_loop(req_rx, evt_rx, midi_rx);
+        .run_loop(req_rx, evt_rx, midi_rx, delayed_evt_rx);
 
         Ok(())
+    }
+
+    #[must_use]
+    fn delay_event(&mut self, event: DelayedEvent, timeout: Duration) -> timer::Guard {
+        let sender = self.delayed_evt_tx.clone();
+        self.timer
+            .schedule_with_delay(chrono::Duration::from_std(timeout).unwrap(), move || {
+                let _ = sender.send(event);
+            })
     }
 
     fn handle_request(&mut self, request: app::Request) -> Result<ControlFlow<(), ()>, Error> {
@@ -120,23 +124,23 @@ impl<'a> Controller<'a> {
         match request {
             ConnectPort((direction, port_name)) => {
                 self.midi_ports.connect(direction, port_name)?;
-                self.try_ctrl_surf_identification()?;
+                self.try_ctrl_surf_connection()?;
                 self.refresh_ports()?;
             }
             DisconnectPort(direction) => {
-                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
+                self.send_to_ctrl_surf(ctrl_surf::event::Transport::Stop);
                 self.midi_ports.disconnect(direction)?;
                 self.refresh_ports()?;
             }
             RefreshPorts => self.refresh_ports()?,
             UseControlSurface(ctrl_surf) => self.use_ctrl_surf(ctrl_surf)?,
             NoControlSurface => {
-                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
+                self.send_to_ctrl_surf(ctrl_surf::event::Transport::Stop);
                 self.ctrl_surf = None;
                 log::info!("Control Surface not used");
             }
             ResetControlSurface => {
-                self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
+                self.send_to_ctrl_surf(ctrl_surf::event::Transport::Stop);
             }
             ScanControlSurface => {}
             UsePlayer(player_name) => {
@@ -159,7 +163,10 @@ impl<'a> Controller<'a> {
 
         Ok(ControlFlow::Continue(()))
     }
+}
 
+/// MIDI stuff.
+impl<'a> Controller<'a> {
     fn refresh_ports(&mut self) -> Result<(), Error> {
         self.midi_ports.refresh()?;
         self.ports_panel.lock().unwrap().update(&self.midi_ports);
@@ -167,6 +174,19 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
+    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), Error> {
+        match self.ctrl_surf {
+            Some(ref ctrl_surf) => {
+                let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
+                self.handle_ctrl_surf_resp(resp)
+            }
+            None => Ok(()),
+        }
+    }
+}
+
+/// Control Surface stuff.
+impl<'a> Controller<'a> {
     fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> Result<(), Error> {
         let ctrl_surf = crate::ctrl_surf::FACTORY
             .build(&ctrl_surf_name)
@@ -180,17 +200,17 @@ impl<'a> Controller<'a> {
         self.ctrl_surf = Some(ctrl_surf);
         self.ctrl_surf_panel.lock().unwrap().update(ctrl_surf_name);
 
-        self.try_ctrl_surf_identification()?;
+        self.try_ctrl_surf_connection()?;
 
         Ok(())
     }
 
-    fn try_ctrl_surf_identification(&mut self) -> Result<(), Error> {
+    fn try_ctrl_surf_connection(&mut self) -> Result<(), Error> {
         // FIXME scan for known ctrl surf on currently selected port
         // and other ports if identification fails.
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             if !self.midi_ports.are_connected() {
-                log::warn!("Need both MIDI ports connected for Control Surface identification");
+                log::warn!("Need both MIDI ports connected for Control Surface connection");
                 return Ok(());
             }
 
@@ -198,20 +218,28 @@ impl<'a> Controller<'a> {
                 "Trying to connect to Control Surface {}",
                 self.ctrl_surf_panel.lock().unwrap().cur
             );
-            let resp = ctrl_surf.lock().unwrap().start_identification();
+            self.ctrl_surf_conn_timeout = None;
+            let resp = ctrl_surf.lock().unwrap().start_connection();
             self.handle_ctrl_surf_resp(resp)?;
         }
 
         Ok(())
     }
 
-    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), Error> {
-        match self.ctrl_surf {
-            Some(ref ctrl_surf) => {
-                let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
-                self.handle_ctrl_surf_resp(resp)
+    fn ctrl_surf_connection_timeout(&mut self) {
+        self.ctrl_surf_conn_timeout = None;
+        if let Some(ref ctrl_surf) = self.ctrl_surf {
+            let mut ctrl_surf = ctrl_surf.lock().unwrap();
+            if !ctrl_surf.is_connected() {
+                ctrl_surf.abort_connection();
+                drop(ctrl_surf);
+
+                let err = Error::ControlSurfaceConnection(
+                    self.ctrl_surf_panel.lock().unwrap().cur.clone(),
+                );
+                log::error!("{err}");
+                let _ = self.err_tx.send(err);
             }
-            None => Ok(()),
         }
     }
 
@@ -230,7 +258,7 @@ impl<'a> Controller<'a> {
                             use ctrl_surf::event::Mixer::*;
                             match mixer {
                                 Volume(_) => self.players.handle_event(event)?,
-                                Mute => log::warn!("Attempt to mute (unimplemented)"),
+                                Mute => log::warn!("Attempt to mute (not implemented)"),
                             }
                         }
                         DataRequest => self.players.handle_event(event)?,
@@ -249,9 +277,13 @@ impl<'a> Controller<'a> {
                                 "Waiting for connection to Control Surface {}",
                                 self.ctrl_surf_panel.lock().unwrap().cur
                             );
-                            self.waker = channel::after(CTRL_SURF_CONNECTION_TIMEOUT);
+                            self.ctrl_surf_conn_timeout = Some(self.delay_event(
+                                DelayedEvent::CtrlSurfConnectionTimeout,
+                                CTRL_SURF_CONNECTION_TIMEOUT,
+                            ));
                         }
                         Result(Ok(())) => {
+                            self.ctrl_surf_conn_timeout = None;
                             log::info!(
                                 "Connected to Control Surface {}",
                                 self.ctrl_surf_panel.lock().unwrap().cur
@@ -268,7 +300,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn feed_ctrl_surf_back(&mut self, event: impl Into<ctrl_surf::event::Feedback>) {
+    fn send_to_ctrl_surf(&mut self, event: impl Into<ctrl_surf::event::Feedback>) {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let resp = {
                 let mut ctrl_surf = ctrl_surf.lock().unwrap();
@@ -281,14 +313,17 @@ impl<'a> Controller<'a> {
             let _ = self.handle_ctrl_surf_resp(resp);
         }
     }
+}
 
+/// Mpris Player stuff.
+impl<'a> Controller<'a> {
     fn handle_player_event(&mut self, event: ctrl_surf::event::Feedback) -> Result<(), Error> {
         use ctrl_surf::event::{Data::*, Feedback::*, Transport::Stop};
 
         match event {
             Transport(Stop) => {
                 log::info!("Player: Stop");
-                self.feed_ctrl_surf_back(Stop);
+                self.send_to_ctrl_surf(Stop);
                 self.refresh_players()?;
                 self.player_panel.lock().unwrap().reset_data();
                 self.must_repaint = true;
@@ -296,12 +331,12 @@ impl<'a> Controller<'a> {
             Data(Track(ref track)) => {
                 log::debug!("Player: Track {:?} - {:?}", track.artist, track.title);
                 self.player_panel.lock().unwrap().update_track(track);
-                self.feed_ctrl_surf_back(event);
+                self.send_to_ctrl_surf(event);
             }
             Data(Timecode(tc)) => {
                 log::trace!("Player: {event:?}");
                 self.player_panel.lock().unwrap().update_position(tc);
-                self.feed_ctrl_surf_back(event);
+                self.send_to_ctrl_surf(event);
                 self.must_repaint = true;
             }
             NewApp(_) => {
@@ -313,12 +348,12 @@ impl<'a> Controller<'a> {
                 if !is_connected {
                     self.players.send_all_data()?;
                 } else {
-                    self.feed_ctrl_surf_back(event);
+                    self.send_to_ctrl_surf(event);
                 }
             }
             _ => {
                 log::debug!("Player: {event:?}");
-                self.feed_ctrl_surf_back(event);
+                self.send_to_ctrl_surf(event);
             }
         }
 
@@ -334,12 +369,16 @@ impl<'a> Controller<'a> {
 
         Ok(())
     }
+}
 
+/// Controller loop.
+impl<'a> Controller<'a> {
     fn run_loop(
         mut self,
         req_rx: channel::Receiver<app::Request>,
         evt_rx: channel::Receiver<ctrl_surf::event::Feedback>,
         midi_rx: channel::Receiver<midi::Msg>,
+        delayed_evt_rx: channel::Receiver<DelayedEvent>,
     ) {
         loop {
             channel::select! {
@@ -389,8 +428,19 @@ impl<'a> Controller<'a> {
                         }
                     }
                 }
-                recv(self.waker) -> _ => {
-                    log::info!("Awaken");
+                recv(delayed_evt_rx) -> devt => {
+                    use DelayedEvent::*;
+                    match devt {
+                        Ok(devt) => match devt {
+                            CtrlSurfConnectionTimeout => {
+                                self.ctrl_surf_connection_timeout();
+                            }
+                        },
+                        Err(err) => {
+                            log::error!("Error delayed event channel: {err}");
+                            break;
+                        }
+                    }
                 }
             }
 

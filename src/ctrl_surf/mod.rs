@@ -19,7 +19,8 @@ pub use msg::Msg;
 mod protocol;
 
 pub trait ControlSurface: Send + 'static {
-    fn start_identification(&mut self) -> Vec<Msg>;
+    fn start_connection(&mut self) -> Vec<Msg>;
+    fn abort_connection(&mut self) -> Vec<Msg>;
 
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg>;
     fn event_to_device(&mut self, event: event::Feedback) -> Vec<Msg>;

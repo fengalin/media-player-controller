@@ -61,7 +61,6 @@ impl From<Mixer> for Feedback {
 pub enum Data {
     Track(super::Track),
     Timecode(super::Timecode),
-    AppName(Arc<str>),
 }
 
 impl From<Data> for Feedback {

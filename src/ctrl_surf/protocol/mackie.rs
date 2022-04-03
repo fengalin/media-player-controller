@@ -1,3 +1,6 @@
+use once_cell::sync::Lazy;
+use std::sync::Arc;
+
 use crate::{
     ctrl_surf::{
         self,
@@ -57,9 +60,12 @@ mod fader {
     pub const TOUCH_THRSD: u8 = 64;
 }
 
+static NO_APP: Lazy<Arc<str>> = Lazy::new(|| "_NOAPP_".into());
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum State {
     Connecting(ConnectionStatus),
+    PendingAppData,
     Connected,
     Disconnected,
     Playing,
@@ -85,6 +91,7 @@ pub struct Mackie {
     chan: midi::Channel,
     state: State,
     fader_state: FaderState,
+    app: Arc<str>,
 }
 
 impl Mackie {
@@ -95,25 +102,33 @@ impl Mackie {
             chan: midi::Channel::default(),
             state: State::Disconnected,
             fader_state: FaderState::Released,
+            app: NO_APP.clone(),
         }
     }
 }
 
 impl crate::ctrl_surf::ControlSurface for Mackie {
-    fn start_identification(&mut self) -> Vec<Msg> {
+    fn start_connection(&mut self) -> Vec<Msg> {
         use connection::*;
 
-        log::debug!("Starting device {:#02x} identification", self.device_id);
+        log::debug!("Attempt to connect to device {:#02x}", self.device_id);
 
-        *self = Mackie {
-            state: State::Connecting(ConnectionStatus::DeviceQueried),
-            ..*self
-        };
+        self.state = State::Connecting(ConnectionStatus::DeviceQueried);
 
         vec![
             midi::Msg::new_sysex(&self.payload_for(QUERY_DEVICE)).to_device(),
             Msg::connetion_in_progress(),
         ]
+    }
+
+    fn abort_connection(&mut self) -> Vec<Msg> {
+        if let State::Connecting(_) = self.state {
+            log::debug!("Aborting connection to device {:#02x}", self.device_id);
+
+            self.state = State::Disconnected;
+        }
+
+        Msg::none()
     }
 
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg> {
@@ -179,20 +194,33 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 }
             }
             NewApp(app) => {
-                log::debug!("New application {app}. Reseting and requesting data");
-                let mut msg_list = self.reset();
-                msg_list.push(CtrlSurfEvent::DataRequest.into());
+                let msg_list = if app != self.app && self.state != State::PendingAppData {
+                    log::debug!("New application {app}. Reseting and requesting data");
+
+                    let mut msg_list = self.reset();
+
+                    self.app = app;
+                    self.state = State::PendingAppData;
+                    // FIXME send player name to device
+
+                    msg_list.push(CtrlSurfEvent::DataRequest.into());
+
+                    msg_list
+                } else {
+                    Msg::none()
+                };
 
                 return msg_list;
             }
             Data(data) => {
                 use event::Data::*;
+
+                if self.state == State::PendingAppData {
+                    self.state = State::Connected;
+                }
+
                 match data {
                     Timecode(tc) => return self.app_timecode(tc),
-                    AppName(player) => {
-                        log::debug!("got {}", player);
-                        // FIXME send to player name to device
-                    }
                     Track(_) => (),
                 }
             }
@@ -222,12 +250,12 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
             list.push([display_7_seg::TAG.into(), TIME_LEFT_DIGIT - idx as u8, b' '].into());
         }
 
-        let state = match self.state {
+        self.state = match self.state {
             Connected | Playing | Stopped => Connected,
             other => other,
         };
-
-        *self = Self { state, ..*self };
+        self.last_tc = TimecodeBreakDown::default();
+        self.app = NO_APP.clone();
 
         list
     }
@@ -296,7 +324,7 @@ impl Mackie {
         let tag_chan = button::TAG | self.chan;
 
         match self.state {
-            Connected | Stopped => {
+            Connected | PendingAppData | Stopped => {
                 self.state = Playing;
                 list.push([tag_chan, STOP, OFF].into());
             }
@@ -317,7 +345,7 @@ impl Mackie {
         let tag_chan = button::TAG | self.chan;
 
         match self.state {
-            Connected | Playing => {
+            Connected | PendingAppData | Playing => {
                 self.state = Stopped;
                 list.push([tag_chan, PLAY, OFF].into());
             }
@@ -457,8 +485,8 @@ impl Mackie {
     }
 
     fn device_connected(&mut self) -> Vec<Msg> {
-        self.state = State::Connected;
         log::debug!("Connected to device {:#02x}", self.device_id);
+        self.state = State::PendingAppData;
 
         vec![
             Msg::from_connection_result(Ok(())),

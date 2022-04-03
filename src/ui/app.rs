@@ -7,11 +7,11 @@ use crate::{midi, mpris};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Couldn't connect to Control Surface: {}", .0)]
+    ControlSurfaceConnection(Arc<str>),
+
     #[error("Uknwown Control Surface: {}", .0)]
     UnknownControlSurface(Arc<str>),
-
-    #[error("Can't scan Control Surface without MIDI ports")]
-    CtrlSurfScanNoMidiPorts,
 
     #[error("MIDI error: {}", .0)]
     Midi(#[from] midi::Error),
