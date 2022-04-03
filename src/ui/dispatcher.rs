@@ -13,11 +13,11 @@ impl Dispatcher<super::ControlSurfacePanel> {
                 Use(ctrl_surf) => {
                     app.send_req(app::Request::UseControlSurface(ctrl_surf));
                 }
-                NoControlSurface => {
+                Unuse => {
                     app.send_req(app::Request::NoControlSurface);
                 }
-                Discover => {
-                    todo!();
+                Scan => {
+                    app.send_req(app::Request::ScanControlSurface);
                 }
             }
         }
@@ -34,10 +34,10 @@ impl Dispatcher<super::PortsPanel> {
 
             match resp {
                 Connect((direction, port_name)) => {
-                    app.send_req(app::Request::Connect((direction, port_name)));
+                    app.send_req(app::Request::ConnectPort((direction, port_name)));
                 }
                 Disconnect(direction) => {
-                    app.send_req(app::Request::Disconnect(direction));
+                    app.send_req(app::Request::DisconnectPort(direction));
                 }
                 CheckingList => (), // only refresh ports & clear last_err
             }

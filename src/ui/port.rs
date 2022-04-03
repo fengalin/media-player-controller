@@ -1,8 +1,8 @@
 use eframe::{egui, epi};
 use once_cell::sync::Lazy;
-use std::{fmt, sync::Arc};
+use std::sync::Arc;
 
-use crate::midi;
+use crate::midi::{self, port::Direction};
 
 static DISCONNECTED: Lazy<Arc<str>> = Lazy::new(|| "Disconnected".into());
 const STORAGE_PORT_IN: &str = "port_in";
@@ -10,8 +10,8 @@ const STORAGE_PORT_OUT: &str = "port_out";
 
 #[derive(Debug)]
 pub struct DirectionalPorts {
-    list: Vec<Arc<str>>,
-    cur: Arc<str>,
+    pub list: Vec<Arc<str>>,
+    pub cur: Arc<str>,
 }
 
 impl DirectionalPorts {
@@ -20,9 +20,9 @@ impl DirectionalPorts {
         ports: &midi::DirectionalPorts<IO, Conn, D>,
     ) {
         self.list.clear();
-        self.list.extend(ports.list().cloned());
+        self.list.extend(ports.list());
 
-        self.cur = ports.cur().cloned().unwrap_or_else(|| DISCONNECTED.clone());
+        self.cur = ports.cur().unwrap_or_else(|| DISCONNECTED.clone());
     }
 }
 
@@ -31,34 +31,6 @@ impl Default for DirectionalPorts {
         Self {
             list: Vec::new(),
             cur: DISCONNECTED.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Direction {
-    In,
-    Out,
-}
-
-impl fmt::Display for Direction {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Direction {
-    pub fn idx(self) -> usize {
-        match self {
-            Direction::In => 0,
-            Direction::Out => 1,
-        }
-    }
-
-    pub fn as_str(&self) -> &str {
-        match self {
-            Direction::In => "In Port",
-            Direction::Out => "Out Port",
         }
     }
 }
@@ -158,8 +130,8 @@ impl PortsPanel {
 /// The following functions must be called from the AppController thread,
 /// not the UI update thread.
 impl PortsPanel {
-    pub fn update<D>(&mut self, midi_ports_in: &midi::PortsIn<D>, midi_ports_out: &midi::PortsOut) {
-        self.ports[Direction::In.idx()].update_from(midi_ports_in);
-        self.ports[Direction::Out.idx()].update_from(midi_ports_out);
+    pub fn update(&mut self, midi_ports: &midi::port::InOutManager) {
+        self.ports[Direction::In.idx()].update_from(&midi_ports.ins);
+        self.ports[Direction::Out.idx()].update_from(&midi_ports.outs);
     }
 }

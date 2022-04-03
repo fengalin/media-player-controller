@@ -1,9 +1,38 @@
-use std::{collections::BTreeMap, sync::Arc};
+use crossbeam_channel as channel;
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
-use super::io;
+use super::{io, Error, Msg};
 
 pub type PortsIn<D> = DirectionalPorts<midir::MidiInput, midir::MidiInputConnection<D>, D>;
 pub type PortsOut = DirectionalPorts<midir::MidiOutput, midir::MidiOutputConnection, ()>;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Direction {
+    In,
+    Out,
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Direction {
+    pub fn idx(self) -> usize {
+        match self {
+            Direction::In => 0,
+            Direction::Out => 1,
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Direction::In => "In Port",
+            Direction::Out => "Out Port",
+        }
+    }
+}
 
 pub struct DirectionalPorts<IO: midir::MidiIO, Conn, D> {
     map: BTreeMap<Arc<str>, IO::Port>,
@@ -13,19 +42,19 @@ pub struct DirectionalPorts<IO: midir::MidiIO, Conn, D> {
 }
 
 impl<IO: midir::MidiIO, Conn, D> DirectionalPorts<IO, Conn, D> {
-    pub fn list(&self) -> impl Iterator<Item = &Arc<str>> {
-        self.map.keys()
+    pub fn list(&self) -> impl Iterator<Item = Arc<str>> + '_ {
+        self.map.keys().cloned()
     }
 
-    pub fn cur(&self) -> Option<&Arc<str>> {
-        self.cur.as_ref()
+    pub fn cur(&self) -> Option<Arc<str>> {
+        self.cur.as_ref().cloned()
     }
 
     pub fn is_connected(&self) -> bool {
         self.midi_conn.is_connected()
     }
 
-    fn refresh_from(&mut self, conn: IO) -> Result<(), super::Error> {
+    fn refresh_from(&mut self, conn: IO) -> Result<(), Error> {
         self.map.clear();
 
         let mut prev = self.cur.take();
@@ -47,7 +76,7 @@ impl<IO: midir::MidiIO, Conn, D> DirectionalPorts<IO, Conn, D> {
 }
 
 impl<D: Send + Clone> PortsIn<D> {
-    pub fn try_new(client_name: Arc<str>, data: D) -> Result<Self, super::Error> {
+    pub fn try_new(client_name: Arc<str>, data: D) -> Result<Self, Error> {
         Ok(Self {
             map: BTreeMap::new(),
             cur: None,
@@ -56,7 +85,7 @@ impl<D: Send + Clone> PortsIn<D> {
         })
     }
 
-    pub fn refresh(&mut self) -> Result<(), super::Error> {
+    pub fn refresh(&mut self) -> Result<(), Error> {
         let temp_conn = midir::MidiInput::new(&format!("{} referesh In ports", self.client_name,))?;
 
         self.refresh_from(temp_conn)?;
@@ -64,21 +93,21 @@ impl<D: Send + Clone> PortsIn<D> {
         Ok(())
     }
 
-    pub fn connect<C>(&mut self, port_name: Arc<str>, callback: C) -> Result<(), super::Error>
+    pub fn connect<C>(&mut self, port_name: Arc<str>, callback: C) -> Result<(), Error>
     where
         C: FnMut(u64, &[u8], &mut D) + Send + 'static,
     {
         let port = self
             .map
             .get(&port_name)
-            .ok_or_else(|| super::Error::PortNotFound(port_name.clone()))?
+            .ok_or_else(|| Error::PortNotFound(port_name.clone()))?
             .clone();
 
         self.midi_conn
             .connect(port_name.clone(), &port, &self.client_name, callback)
             .map_err(|_| {
                 self.cur = None;
-                super::Error::PortConnection
+                Error::PortConnection
             })?;
 
         log::info!("Connected for Input to {}", port_name);
@@ -97,7 +126,7 @@ impl<D: Send + Clone> PortsIn<D> {
 }
 
 impl PortsOut {
-    pub fn try_new(client_name: Arc<str>) -> Result<Self, super::Error> {
+    pub fn try_new(client_name: Arc<str>) -> Result<Self, Error> {
         Ok(Self {
             map: BTreeMap::new(),
             cur: None,
@@ -106,7 +135,7 @@ impl PortsOut {
         })
     }
 
-    pub fn refresh(&mut self) -> Result<(), super::Error> {
+    pub fn refresh(&mut self) -> Result<(), Error> {
         let temp_conn =
             midir::MidiOutput::new(&format!("{} referesh Out ports", self.client_name,))?;
 
@@ -115,18 +144,18 @@ impl PortsOut {
         Ok(())
     }
 
-    pub fn connect(&mut self, port_name: Arc<str>) -> Result<(), super::Error> {
+    pub fn connect(&mut self, port_name: Arc<str>) -> Result<(), Error> {
         let port = self
             .map
             .get(&port_name)
-            .ok_or_else(|| super::Error::PortNotFound(port_name.clone()))?
+            .ok_or_else(|| Error::PortNotFound(port_name.clone()))?
             .clone();
 
         self.midi_conn
             .connect(port_name.clone(), &port, &self.client_name)
             .map_err(|_| {
                 self.cur = None;
-                super::Error::PortConnection
+                Error::PortConnection
             })?;
 
         log::info!("Connected for Output to {}", port_name);
@@ -135,8 +164,8 @@ impl PortsOut {
         Ok(())
     }
 
-    pub fn send(&mut self, msg: &[u8]) -> Result<(), super::Error> {
-        self.midi_conn.send(msg)
+    pub fn send(&mut self, msg: Msg) -> Result<(), Error> {
+        self.midi_conn.send(&msg)
     }
 
     pub fn disconnect(&mut self) {
@@ -145,5 +174,60 @@ impl PortsOut {
         if let Some(cur) = self.cur.take() {
             log::debug!("Disconnected Output from {}", cur);
         }
+    }
+}
+
+pub struct InOutManager {
+    pub ins: PortsIn<channel::Sender<Msg>>,
+    pub outs: PortsOut,
+}
+
+impl InOutManager {
+    pub fn try_new(client_name: Arc<str>, msg_tx: channel::Sender<Msg>) -> Result<Self, Error> {
+        let ins = PortsIn::try_new(client_name.clone(), msg_tx)?;
+        let outs = PortsOut::try_new(client_name)?;
+
+        Ok(Self { ins, outs })
+    }
+
+    pub fn connect(&mut self, direction: Direction, port_name: Arc<str>) -> Result<(), Error> {
+        use Direction::*;
+        match direction {
+            In => {
+                self.ins.connect(port_name, |_ts, msg, msg_tx| {
+                    let _ = msg_tx.send(msg.into());
+                })?;
+            }
+            Out => {
+                self.outs.connect(port_name)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn disconnect(&mut self, direction: Direction) -> Result<(), Error> {
+        use Direction::*;
+        match direction {
+            In => self.ins.disconnect(),
+            Out => self.outs.disconnect(),
+        }
+
+        Ok(())
+    }
+
+    pub fn are_connected(&self) -> bool {
+        self.ins.is_connected() && self.outs.is_connected()
+    }
+
+    pub fn send(&mut self, msg: Msg) -> Result<(), Error> {
+        self.outs.send(msg)
+    }
+
+    pub fn refresh(&mut self) -> Result<(), Error> {
+        self.ins.refresh()?;
+        self.outs.refresh()?;
+
+        Ok(())
     }
 }

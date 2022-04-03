@@ -10,6 +10,9 @@ pub enum Error {
     #[error("Uknwown Control Surface: {}", .0)]
     UnknownControlSurface(Arc<str>),
 
+    #[error("Can't scan Control Surface without MIDI ports")]
+    CtrlSurfScanNoMidiPorts,
+
     #[error("MIDI error: {}", .0)]
     Midi(#[from] midi::Error),
 
@@ -18,12 +21,13 @@ pub enum Error {
 }
 
 pub enum Request {
-    Connect((super::port::Direction, Arc<str>)),
-    Disconnect(super::port::Direction),
+    ConnectPort((midi::port::Direction, Arc<str>)),
+    DisconnectPort(midi::port::Direction),
     RefreshPorts,
     UseControlSurface(Arc<str>),
     NoControlSurface,
     ResetControlSurface,
+    ScanControlSurface,
     UsePlayer(Arc<str>),
     RefreshPlayers,
     Shutdown,
@@ -90,7 +94,7 @@ impl epi::App for App {
                 ui.add_space(2f32);
 
                 ui.horizontal(|ui| {
-                    use super::port::Direction;
+                    use midi::port::Direction;
 
                     let resp_in = self.ports_panel.lock().unwrap().show(Direction::In, ui);
                     ui.add_space(20f32);

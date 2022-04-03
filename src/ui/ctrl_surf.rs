@@ -5,15 +5,15 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum Response {
     Use(Arc<str>),
-    NoControlSurface,
-    Discover,
+    Unuse,
+    Scan,
 }
 
 static NO_CTRL_SURF: Lazy<Arc<str>> = Lazy::new(|| "No Control Surface".into());
 const STORAGE_CTRL_SURF: &str = "control_surface";
 
 pub struct ControlSurfacePanel {
-    list: Vec<Arc<str>>,
+    pub list: Vec<Arc<str>>,
     pub cur: Arc<str>,
 }
 
@@ -45,7 +45,7 @@ impl ControlSurfacePanel {
                         )
                         .clicked()
                     {
-                        resp = Some(NoControlSurface);
+                        resp = Some(Unuse);
                     }
 
                     for ctrl_surf in self.list.iter() {
@@ -59,9 +59,11 @@ impl ControlSurfacePanel {
                 });
 
             ui.add_space(20f32);
-            if ui.button("Discover").clicked() {
-                resp = Some(Discover)
-            }
+            ui.add_enabled_ui(self.cur != *NO_CTRL_SURF, |ui| {
+                if ui.button("Scan").clicked() {
+                    resp = Some(Scan)
+                }
+            });
 
             resp
         })
@@ -74,7 +76,7 @@ impl ControlSurfacePanel {
         if let Some(storage) = storage {
             if let Some(ctrl_surf) = storage.get_string(STORAGE_CTRL_SURF) {
                 if ctrl_surf == NO_CTRL_SURF.as_ref() {
-                    return Some(NoControlSurface);
+                    return Some(Unuse);
                 }
 
                 return Some(Use(ctrl_surf.into()));

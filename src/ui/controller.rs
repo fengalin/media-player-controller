@@ -3,6 +3,7 @@ use eframe::epi;
 use std::{
     ops::ControlFlow,
     sync::{Arc, Mutex},
+    time::{Duration, Instant},
 };
 
 use super::app::{self, Error};
@@ -10,6 +11,21 @@ use crate::{
     ctrl_surf::{self, event::CtrlSurfEvent},
     midi, mpris,
 };
+
+const CTRL_SURF_CONNECTION_TIMEOUT: Duration = Duration::from_millis(250);
+
+enum PendingAction {
+    CtrlSurfScanSame {
+        iter: Box<dyn Iterator<Item = Arc<str>>>,
+    },
+    CtrlSurfScanDistinct {
+        // FIXME probably need cur
+        // and decide which direction to use first.
+        in_iter: Box<dyn Iterator<Item = Arc<str>>>,
+        out_iter: Box<dyn Iterator<Item = Arc<str>>>,
+    },
+    None,
+}
 
 pub struct Spawner {
     pub req_rx: channel::Receiver<app::Request>,
@@ -37,12 +53,12 @@ impl Spawner {
 
 struct Controller<'a> {
     err_tx: channel::Sender<Error>,
+    waker: channel::Receiver<Instant>,
 
     ctrl_surf: Option<ctrl_surf::ControlSurfaceArc>,
     ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
 
-    midi_ports_in: midi::PortsIn<channel::Sender<midi::Msg>>,
-    midi_ports_out: midi::PortsOut,
+    midi_ports: midi::port::InOutManager,
     ports_panel: Arc<Mutex<super::PortsPanel>>,
 
     players: mpris::Players<'a>,
@@ -50,6 +66,8 @@ struct Controller<'a> {
 
     must_repaint: bool,
     frame: Option<epi::Frame>,
+
+    pending_action: PendingAction,
 }
 
 // Important: panels Mutexes must be released as soon as possible.
@@ -65,27 +83,22 @@ impl<'a> Controller<'a> {
     ) -> Result<(), ()> {
         let (midi_tx, midi_rx) = channel::unbounded();
 
-        let midi_ports_in =
-            midi::PortsIn::try_new(client_name.clone(), midi_tx).map_err(|err| {
-                log::error!("Error creating Controller: {}", err);
+        let midi_ports =
+            midi::port::InOutManager::try_new(client_name, midi_tx).map_err(|err| {
+                log::error!("Error MIDI ports manager: {}", err);
                 let _ = err_tx.send(err.into());
             })?;
-
-        let midi_ports_out = midi::PortsOut::try_new(client_name).map_err(|err| {
-            log::error!("Error creating Controller: {}", err);
-            let _ = err_tx.send(err.into());
-        })?;
 
         let (players, evt_rx) = mpris::Players::new();
 
         Self {
             err_tx,
+            waker: channel::after(Duration::ZERO),
 
             ctrl_surf: None,
             ctrl_surf_panel,
 
-            midi_ports_in,
-            midi_ports_out,
+            midi_ports,
 
             ports_panel,
             players,
@@ -93,6 +106,8 @@ impl<'a> Controller<'a> {
 
             must_repaint: false,
             frame: None,
+
+            pending_action: PendingAction::None,
         }
         .run_loop(req_rx, evt_rx, midi_rx);
 
@@ -103,10 +118,15 @@ impl<'a> Controller<'a> {
         use app::Request::*;
 
         match request {
-            Connect((direction, port_name)) => self.connect_port(direction, port_name)?,
-            Disconnect(direction) => {
+            ConnectPort((direction, port_name)) => {
+                self.midi_ports.connect(direction, port_name)?;
+                self.try_ctrl_surf_identification()?;
+                self.refresh_ports()?;
+            }
+            DisconnectPort(direction) => {
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
-                self.disconnect_port(direction)?;
+                self.midi_ports.disconnect(direction)?;
+                self.refresh_ports()?;
             }
             RefreshPorts => self.refresh_ports()?,
             UseControlSurface(ctrl_surf) => self.use_ctrl_surf(ctrl_surf)?,
@@ -118,6 +138,7 @@ impl<'a> Controller<'a> {
             ResetControlSurface => {
                 self.feed_ctrl_surf_back(ctrl_surf::event::Transport::Stop);
             }
+            ScanControlSurface => {}
             UsePlayer(player_name) => {
                 self.players.set_cur(player_name).unwrap();
                 {
@@ -139,48 +160,9 @@ impl<'a> Controller<'a> {
         Ok(ControlFlow::Continue(()))
     }
 
-    fn connect_port(
-        &mut self,
-        direction: super::port::Direction,
-        port_name: Arc<str>,
-    ) -> Result<(), Error> {
-        use super::port::Direction;
-        match direction {
-            Direction::In => {
-                self.midi_ports_in.connect(port_name, |_ts, msg, midi_tx| {
-                    let _ = midi_tx.send(msg.into());
-                })?;
-                self.try_ctrl_surf_identification()?;
-            }
-            Direction::Out => {
-                self.midi_ports_out.connect(port_name)?;
-                self.try_ctrl_surf_identification()?;
-            }
-        }
-
-        self.refresh_ports()?;
-
-        Ok(())
-    }
-
-    fn disconnect_port(&mut self, direction: super::port::Direction) -> Result<(), Error> {
-        use super::port::Direction::*;
-        match direction {
-            In => self.midi_ports_in.disconnect(),
-            Out => self.midi_ports_out.disconnect(),
-        }
-        self.refresh_ports()?;
-
-        Ok(())
-    }
-
     fn refresh_ports(&mut self) -> Result<(), Error> {
-        self.midi_ports_in.refresh()?;
-        self.midi_ports_out.refresh()?;
-        self.ports_panel
-            .lock()
-            .unwrap()
-            .update(&self.midi_ports_in, &self.midi_ports_out);
+        self.midi_ports.refresh()?;
+        self.ports_panel.lock().unwrap().update(&self.midi_ports);
 
         Ok(())
     }
@@ -207,7 +189,7 @@ impl<'a> Controller<'a> {
         // FIXME scan for known ctrl surf on currently selected port
         // and other ports if identification fails.
         if let Some(ref ctrl_surf) = self.ctrl_surf {
-            if !self.midi_ports_out.is_connected() || !self.midi_ports_in.is_connected() {
+            if !self.midi_ports.are_connected() {
                 log::warn!("Need both MIDI ports connected for Control Surface identification");
                 return Ok(());
             }
@@ -255,8 +237,8 @@ impl<'a> Controller<'a> {
                     }
                 }
                 ToDevice(msg) => {
-                    if self.midi_ports_out.is_connected() {
-                        let _ = self.midi_ports_out.send(&msg);
+                    if self.midi_ports.are_connected() {
+                        let _ = self.midi_ports.send(msg);
                     }
                 }
                 ConnectionStatus(res) => {
@@ -267,6 +249,7 @@ impl<'a> Controller<'a> {
                                 "Waiting for connection to Control Surface {}",
                                 self.ctrl_surf_panel.lock().unwrap().cur
                             );
+                            self.waker = channel::after(CTRL_SURF_CONNECTION_TIMEOUT);
                         }
                         Result(Ok(())) => {
                             log::info!(
@@ -405,6 +388,9 @@ impl<'a> Controller<'a> {
                             break;
                         }
                     }
+                }
+                recv(self.waker) -> _ => {
+                    log::info!("Awaken");
                 }
             }
 
