@@ -19,12 +19,20 @@ pub use msg::Msg;
 mod protocol;
 
 pub trait ControlSurface: Send + 'static {
+    #[must_use]
     fn start_connection(&mut self) -> Vec<Msg>;
+
+    #[must_use]
     fn abort_connection(&mut self) -> Vec<Msg>;
 
+    #[must_use]
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg>;
+
+    #[must_use]
     fn event_to_device(&mut self, event: event::Feedback) -> Vec<Msg>;
 
     fn is_connected(&self) -> bool;
+
+    #[must_use]
     fn reset(&mut self) -> Vec<Msg>;
 }

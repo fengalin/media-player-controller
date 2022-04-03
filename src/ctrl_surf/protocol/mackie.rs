@@ -433,13 +433,13 @@ impl Mackie {
             (DEVICE_ERR, Some(_serial)) => {
                 self.state = State::Disconnected;
                 let err = ConnectionError;
-                log::error!("{err}");
+                log::debug!("{err}");
                 return Err(err);
             }
             _ => {
                 self.state = State::Disconnected;
                 let err = UnexpectedDeviceMsg(msg.display().to_owned());
-                log::error!("{err}");
+                log::debug!("{err}");
                 return Err(err);
             }
         };

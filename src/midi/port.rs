@@ -177,9 +177,23 @@ impl PortsOut {
     }
 }
 
+enum State {
+    Static,
+    Scanning {
+        iter: Box<dyn Iterator<Item = Arc<str>>>,
+    },
+}
+
+#[derive(Debug)]
+pub enum ScannerStatus {
+    Connected,
+    Completed,
+}
+
 pub struct InOutManager {
     pub ins: PortsIn<channel::Sender<Msg>>,
     pub outs: PortsOut,
+    state: State,
 }
 
 impl InOutManager {
@@ -187,7 +201,11 @@ impl InOutManager {
         let ins = PortsIn::try_new(client_name.clone(), msg_tx)?;
         let outs = PortsOut::try_new(client_name)?;
 
-        Ok(Self { ins, outs })
+        Ok(Self {
+            ins,
+            outs,
+            state: State::Static,
+        })
     }
 
     pub fn connect(&mut self, direction: Direction, port_name: Arc<str>) -> Result<(), Error> {
@@ -220,14 +238,77 @@ impl InOutManager {
         self.ins.is_connected() && self.outs.is_connected()
     }
 
+    pub fn is_scanning(&self) -> bool {
+        matches!(self.state, State::Scanning { .. })
+    }
+
     pub fn send(&mut self, msg: Msg) -> Result<(), Error> {
         self.outs.send(msg)
     }
 
     pub fn refresh(&mut self) -> Result<(), Error> {
+        if self.is_scanning() {
+            return Err(Error::ScanningPorts);
+        }
+
         self.ins.refresh()?;
         self.outs.refresh()?;
 
         Ok(())
+    }
+
+    /// Returns the next port name for scanning.
+    ///
+    /// If the [`InOutManager`] is in `Static` mode, this will
+    /// attempt to connect in and out ports with the same name
+    /// and switch to scanning mode if a connection could be established.
+    ///
+    /// If the [`InOutManager`] is already in `Scanning` mode,
+    /// this will attempt to connect the next ports with the same
+    /// name.
+    ///
+    /// # Returns
+    ///
+    /// - `Some(port_name)` if in & out `port_name` ports could be connected.
+    /// - `None` if no more ports were available or could be connected.
+    pub fn scanner_next(&mut self) -> Option<Arc<str>> {
+        use State::*;
+
+        // Take ownership of the state so that we can get `iter`
+        // as mutable while using `self` as mutable too.
+        let state = std::mem::replace(&mut self.state, Static);
+        let mut iter = match state {
+            Static => Box::new(self.ins.list().collect::<Vec<Arc<str>>>().into_iter()),
+            Scanning { iter } => iter,
+        };
+
+        let mut cur = None;
+        for port_name in iter.by_ref() {
+            let could_connect_both = self.connect(Direction::In, port_name.clone()).is_ok()
+                && self.connect(Direction::Out, port_name.clone()).is_ok();
+
+            if could_connect_both {
+                cur = Some(port_name);
+                break;
+            }
+        }
+
+        if cur.is_none() {
+            log::debug!("No more ports to scan");
+            return None;
+        }
+
+        self.state = Scanning { iter };
+
+        cur
+    }
+
+    /// Aborts the `Scanner` mode.
+    ///
+    /// This allows switching back to `Static` mode,
+    /// e.g. when a device could be found on currently
+    /// connected ports.
+    pub fn abort_scanner(&mut self) {
+        self.state = State::Static;
     }
 }

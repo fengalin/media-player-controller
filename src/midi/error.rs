@@ -24,6 +24,9 @@ pub enum Error {
     #[error("Invalid MIDI port name {}", .0)]
     PortNotFound(Arc<str>),
 
+    #[error("MIDI port refresh discarded while scanning")]
+    ScanningPorts,
+
     #[error("Invalid two bytes value: {}", .0)]
     InvalidTwoBytesValue(bytes::Displayable<'static>),
 

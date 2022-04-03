@@ -10,6 +10,9 @@ pub enum Error {
     #[error("Couldn't connect to Control Surface: {}", .0)]
     ControlSurfaceConnection(Arc<str>),
 
+    #[error("Control Surface not found: {}", .0)]
+    ControlSurfaceNotFound(Arc<str>),
+
     #[error("Uknwown Control Surface: {}", .0)]
     UnknownControlSurface(Arc<str>),
 

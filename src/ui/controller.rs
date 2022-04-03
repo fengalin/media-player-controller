@@ -124,7 +124,7 @@ impl<'a> Controller<'a> {
         match request {
             ConnectPort((direction, port_name)) => {
                 self.midi_ports.connect(direction, port_name)?;
-                self.try_ctrl_surf_connection()?;
+                self.try_connect_ctrl_surf()?;
                 self.refresh_ports()?;
             }
             DisconnectPort(direction) => {
@@ -142,7 +142,7 @@ impl<'a> Controller<'a> {
             ResetControlSurface => {
                 self.send_to_ctrl_surf(ctrl_surf::event::Transport::Stop);
             }
-            ScanControlSurface => {}
+            ScanControlSurface => self.start_scan(),
             UsePlayer(player_name) => {
                 self.players.set_cur(player_name).unwrap();
                 {
@@ -188,6 +188,16 @@ impl<'a> Controller<'a> {
 /// Control Surface stuff.
 impl<'a> Controller<'a> {
     fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> Result<(), Error> {
+        if let Some(ref ctrl_surf) = self.ctrl_surf {
+            let mut ctrl_surf = ctrl_surf.lock().unwrap();
+            if ctrl_surf.is_connected() {
+                let resp = ctrl_surf.reset();
+                drop(ctrl_surf);
+
+                let _ = self.handle_ctrl_surf_resp(resp);
+            }
+        }
+
         let ctrl_surf = crate::ctrl_surf::FACTORY
             .build(&ctrl_surf_name)
             .ok_or_else(|| {
@@ -200,47 +210,9 @@ impl<'a> Controller<'a> {
         self.ctrl_surf = Some(ctrl_surf);
         self.ctrl_surf_panel.lock().unwrap().update(ctrl_surf_name);
 
-        self.try_ctrl_surf_connection()?;
+        self.try_connect_ctrl_surf()?;
 
         Ok(())
-    }
-
-    fn try_ctrl_surf_connection(&mut self) -> Result<(), Error> {
-        // FIXME scan for known ctrl surf on currently selected port
-        // and other ports if identification fails.
-        if let Some(ref ctrl_surf) = self.ctrl_surf {
-            if !self.midi_ports.are_connected() {
-                log::warn!("Need both MIDI ports connected for Control Surface connection");
-                return Ok(());
-            }
-
-            log::info!(
-                "Trying to connect to Control Surface {}",
-                self.ctrl_surf_panel.lock().unwrap().cur
-            );
-            self.ctrl_surf_conn_timeout = None;
-            let resp = ctrl_surf.lock().unwrap().start_connection();
-            self.handle_ctrl_surf_resp(resp)?;
-        }
-
-        Ok(())
-    }
-
-    fn ctrl_surf_connection_timeout(&mut self) {
-        self.ctrl_surf_conn_timeout = None;
-        if let Some(ref ctrl_surf) = self.ctrl_surf {
-            let mut ctrl_surf = ctrl_surf.lock().unwrap();
-            if !ctrl_surf.is_connected() {
-                ctrl_surf.abort_connection();
-                drop(ctrl_surf);
-
-                let err = Error::ControlSurfaceConnection(
-                    self.ctrl_surf_panel.lock().unwrap().cur.clone(),
-                );
-                log::error!("{err}");
-                let _ = self.err_tx.send(err);
-            }
-        }
     }
 
     fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> Result<(), Error> {
@@ -288,9 +260,16 @@ impl<'a> Controller<'a> {
                                 "Connected to Control Surface {}",
                                 self.ctrl_surf_panel.lock().unwrap().cur
                             );
+
+                            self.midi_ports.abort_scanner();
+                            // FIXME re-enable UI in case we were scanning
                         }
                         Result(Err(err)) => {
                             log::debug!("Control Surface connection: {err}");
+
+                            if self.midi_ports.is_scanning() {
+                                let _ = self.scan_next();
+                            }
                         }
                     }
                 }
@@ -311,6 +290,89 @@ impl<'a> Controller<'a> {
             };
 
             let _ = self.handle_ctrl_surf_resp(resp);
+        }
+    }
+
+    fn try_connect_ctrl_surf(&mut self) -> Result<(), Error> {
+        if let Some(ref ctrl_surf) = self.ctrl_surf {
+            if !self.midi_ports.are_connected() {
+                self.start_scan();
+                return Ok(());
+            }
+
+            log::info!(
+                "Trying to connect to Control Surface {}",
+                self.ctrl_surf_panel.lock().unwrap().cur
+            );
+            self.ctrl_surf_conn_timeout = None;
+            let resp = ctrl_surf.lock().unwrap().start_connection();
+            self.handle_ctrl_surf_resp(resp)?;
+        }
+
+        Ok(())
+    }
+
+    fn ctrl_surf_connection_timeout(&mut self) {
+        self.ctrl_surf_conn_timeout = None;
+        if let Some(ref ctrl_surf) = self.ctrl_surf {
+            let mut ctrl_surf = ctrl_surf.lock().unwrap();
+            if !ctrl_surf.is_connected() {
+                let resp = ctrl_surf.abort_connection();
+                drop(ctrl_surf);
+                let _ = self.handle_ctrl_surf_resp(resp);
+
+                let err = Error::ControlSurfaceConnection(
+                    self.ctrl_surf_panel.lock().unwrap().cur.clone(),
+                );
+
+                if self.midi_ports.is_scanning() {
+                    log::info!("{err}");
+                    let _ = self.scan_next();
+                } else {
+                    log::error!("{err}");
+                    let _ = self.err_tx.send(err);
+                }
+            }
+        }
+    }
+
+    fn start_scan(&mut self) {
+        if self
+            .ctrl_surf
+            .as_ref()
+            .map_or(false, |cs| !cs.lock().unwrap().is_connected())
+        {
+            let res = self.scan_next();
+            if res.is_some() {
+                // FIXME disable the UI so that user doesn't interfer during scanning
+            }
+        }
+    }
+
+    fn scan_next(&mut self) -> Option<Arc<str>> {
+        match self.midi_ports.scanner_next() {
+            Some(port_name) => {
+                log::info!("Scanning {port_name}");
+                self.ports_panel.lock().unwrap().update(&self.midi_ports);
+                let _ = self.try_connect_ctrl_surf();
+
+                Some(port_name)
+            }
+            None => {
+                let _ = self.midi_ports.disconnect(midi::port::Direction::In);
+                let _ = self.midi_ports.disconnect(midi::port::Direction::Out);
+                self.ports_panel.lock().unwrap().update(&self.midi_ports);
+                self.must_repaint = true;
+
+                let ctrl_surf = self.ctrl_surf_panel.lock().unwrap().cur.clone();
+                let err = Error::ControlSurfaceNotFound(ctrl_surf);
+                log::error!("{err}");
+                let _ = self.err_tx.send(err);
+
+                // FIXME re-enable UI
+
+                None
+            }
         }
     }
 }
