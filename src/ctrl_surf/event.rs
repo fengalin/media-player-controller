@@ -8,7 +8,7 @@ pub enum CtrlSurfEvent {
 }
 
 #[derive(Debug)]
-pub enum Feedback {
+pub enum AppEvent {
     Transport(Transport),
     Mixer(Mixer),
     Data(Data),
@@ -33,7 +33,7 @@ impl From<Transport> for CtrlSurfEvent {
     }
 }
 
-impl From<Transport> for Feedback {
+impl From<Transport> for AppEvent {
     fn from(evt: Transport) -> Self {
         Self::Transport(evt)
     }
@@ -51,7 +51,7 @@ impl From<Mixer> for CtrlSurfEvent {
     }
 }
 
-impl From<Mixer> for Feedback {
+impl From<Mixer> for AppEvent {
     fn from(evt: Mixer) -> Self {
         Self::Mixer(evt)
     }
@@ -63,7 +63,7 @@ pub enum Data {
     Timecode(super::Timecode),
 }
 
-impl From<Data> for Feedback {
+impl From<Data> for AppEvent {
     fn from(evt: Data) -> Self {
         Self::Data(evt)
     }
@@ -75,9 +75,9 @@ impl From<super::Track> for Data {
     }
 }
 
-impl From<super::Track> for Feedback {
+impl From<super::Track> for AppEvent {
     fn from(track: super::Track) -> Self {
-        Feedback::from(Data::from(track))
+        AppEvent::from(Data::from(track))
     }
 }
 
@@ -87,8 +87,8 @@ impl From<super::Timecode> for Data {
     }
 }
 
-impl From<super::Timecode> for Feedback {
+impl From<super::Timecode> for AppEvent {
     fn from(tc: super::Timecode) -> Self {
-        Feedback::from(Data::from(tc))
+        AppEvent::from(Data::from(tc))
     }
 }

@@ -8,7 +8,7 @@ use std::{
 
 use super::app::{self, Error};
 use crate::{
-    ctrl_surf::{self, event::CtrlSurfEvent},
+    ctrl_surf::{self, AppEvent, CtrlSurfEvent},
     midi, mpris,
 };
 
@@ -279,14 +279,14 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn send_to_ctrl_surf(&mut self, event: impl Into<ctrl_surf::event::Feedback>) {
+    fn send_to_ctrl_surf(&mut self, event: impl Into<AppEvent>) {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let resp = {
                 let mut ctrl_surf = ctrl_surf.lock().unwrap();
                 if !ctrl_surf.is_connected() {
                     return;
                 }
-                ctrl_surf.event_to_device(event.into())
+                ctrl_surf.event_from_app(event.into())
             };
 
             let _ = self.handle_ctrl_surf_resp(resp);
@@ -379,8 +379,8 @@ impl<'a> Controller<'a> {
 
 /// Mpris Player stuff.
 impl<'a> Controller<'a> {
-    fn handle_player_event(&mut self, event: ctrl_surf::event::Feedback) -> Result<(), Error> {
-        use ctrl_surf::event::{Data::*, Feedback::*, Transport::Stop};
+    fn handle_player_event(&mut self, event: AppEvent) -> Result<(), Error> {
+        use ctrl_surf::event::{AppEvent::*, Data::*, Transport::Stop};
 
         match event {
             Transport(Stop) => {
@@ -438,7 +438,7 @@ impl<'a> Controller<'a> {
     fn run_loop(
         mut self,
         req_rx: channel::Receiver<app::Request>,
-        evt_rx: channel::Receiver<ctrl_surf::event::Feedback>,
+        evt_rx: channel::Receiver<AppEvent>,
         midi_rx: channel::Receiver<midi::Msg>,
         delayed_evt_rx: channel::Receiver<DelayedEvent>,
     ) {

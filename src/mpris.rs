@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use crate::ctrl_surf::{self, event::CtrlSurfEvent};
+use crate::ctrl_surf::{self, AppEvent, CtrlSurfEvent};
 
 const PROGRESS_INTERVAL_MS: u32 = 250;
 
@@ -20,7 +20,7 @@ pub enum Error {
     Event(#[from] mpris::EventError),
 
     #[error("MPRIS sending: {}", 0)]
-    EventSend(#[from] channel::SendError<ctrl_surf::event::Feedback>),
+    EventSend(#[from] channel::SendError<AppEvent>),
 
     #[error("MPRIS event recv: {}", 0)]
     EventRecv(#[from] channel::TryRecvError),
@@ -39,11 +39,11 @@ pub enum Error {
 pub struct Players<'a> {
     map: BTreeMap<Arc<str>, mpris::Player<'a>>,
     cur: Option<(Arc<str>, Arc<AtomicBool>)>,
-    evt_tx: channel::Sender<ctrl_surf::event::Feedback>,
+    evt_tx: channel::Sender<AppEvent>,
 }
 
 impl<'a> Players<'a> {
-    pub fn new() -> (Self, channel::Receiver<ctrl_surf::event::Feedback>) {
+    pub fn new() -> (Self, channel::Receiver<AppEvent>) {
         let (evt_tx, evt_rx) = channel::unbounded();
 
         (
@@ -224,13 +224,13 @@ impl<'a> Players<'a> {
 
     fn event_loop(
         player_name: Arc<str>,
-        evt_tx: channel::Sender<ctrl_surf::event::Feedback>,
+        evt_tx: channel::Sender<AppEvent>,
         stopper: Arc<AtomicBool>,
     ) -> Result<(), Error> {
         let finder = mpris::PlayerFinder::new()?;
         let player = finder.find_by_name(&player_name)?;
 
-        evt_tx.send(ctrl_surf::event::Feedback::NewApp(player_name))?;
+        evt_tx.send(AppEvent::NewApp(player_name))?;
 
         // events.next() is blocking...
         for event in player.events()? {
@@ -246,7 +246,7 @@ impl<'a> Players<'a> {
 
     fn progress_loop(
         player_name: Arc<str>,
-        evt_tx: channel::Sender<ctrl_surf::event::Feedback>,
+        evt_tx: channel::Sender<AppEvent>,
         stopper: Arc<AtomicBool>,
     ) -> Result<(), Error> {
         let finder = mpris::PlayerFinder::new()?;
@@ -276,7 +276,7 @@ impl<'a> Players<'a> {
     }
 }
 
-impl From<mpris::Event> for ctrl_surf::event::Feedback {
+impl From<mpris::Event> for AppEvent {
     fn from(event: mpris::Event) -> Self {
         use ctrl_surf::{
             event::{Mixer, Transport},
@@ -299,7 +299,7 @@ impl From<mpris::Event> for ctrl_surf::event::Feedback {
     }
 }
 
-impl From<mpris::PlaybackStatus> for ctrl_surf::event::Feedback {
+impl From<mpris::PlaybackStatus> for AppEvent {
     fn from(status: mpris::PlaybackStatus) -> Self {
         use ctrl_surf::event::Transport;
         use mpris::PlaybackStatus::*;

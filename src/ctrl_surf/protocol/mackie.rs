@@ -166,13 +166,13 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
         Msg::none()
     }
 
-    fn event_to_device(&mut self, event: Feedback) -> Vec<Msg> {
+    fn event_from_app(&mut self, event: AppEvent) -> Vec<Msg> {
         if !self.is_connected() {
-            log::debug!("Ignoring event: Control surface not connected.");
+            log::debug!("Ignoring App event: Control surface not connected.");
             return Msg::none();
         }
 
-        use Feedback::*;
+        use AppEvent::*;
         match event {
             Transport(event) => {
                 use event::Transport::*;
@@ -309,7 +309,7 @@ impl Mackie {
             Released => {
                 // This could indicate that the fader is moved with
                 // an object or finger nail, which would cause the servo motor
-                // to struggle when the app feedsback with the new volume.
+                // to struggle when the app replies with the new volume.
                 log::warn!("Fader moved but no touch detected => ignoring");
 
                 Msg::none()

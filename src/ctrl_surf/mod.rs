@@ -7,7 +7,7 @@ pub mod error;
 pub use error::Error;
 
 pub mod event;
-pub use event::CtrlSurfEvent;
+pub use event::{AppEvent, CtrlSurfEvent};
 
 mod factory;
 use factory::Buildable;
@@ -29,7 +29,7 @@ pub trait ControlSurface: Send + 'static {
     fn msg_from_device(&mut self, msg: crate::midi::Msg) -> Vec<Msg>;
 
     #[must_use]
-    fn event_to_device(&mut self, event: event::Feedback) -> Vec<Msg>;
+    fn event_from_app(&mut self, event: AppEvent) -> Vec<Msg>;
 
     fn is_connected(&self) -> bool;
 
