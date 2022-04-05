@@ -307,8 +307,12 @@ impl Mackie {
                 Volume(vol).to_app().into()
             }
             Released => {
-                // FIXME is this a problem or even possible?
-                Volume(vol).to_app().into()
+                // This could indicate that the fader is moved with
+                // an object or finger nail, which would cause the servo motor
+                // to struggle when the app feedsback with the new volume.
+                log::warn!("Fader moved but no touch detected => ignoring");
+
+                Msg::none()
             }
         }
     }
