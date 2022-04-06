@@ -1,9 +1,11 @@
-use std::{fmt, io::Write, sync::Arc};
+use std::{fmt, io::Write, sync::Arc, time::Duration};
 
 #[derive(Debug)]
 pub struct Track {
     pub artist: Option<Arc<str>>,
+    pub album: Option<Arc<str>>,
     pub title: Option<Arc<str>>,
+    pub duration: Option<Duration>,
     pub image_url: Option<Arc<str>>,
 }
 

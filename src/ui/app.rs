@@ -85,34 +85,30 @@ impl epi::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("top-area").show(ctx, |ui| {
             ui.heading("MPRIS Controller");
 
             ui.add_space(10f32);
 
-            ui.group(|ui| {
-                let resp = self.ctrl_surf_panel.lock().unwrap().show(ui);
-                Dispatcher::<super::ControlSurfacePanel>::handle(self, resp);
+            let resp = self.ctrl_surf_panel.lock().unwrap().show(ui);
+            Dispatcher::<super::ControlSurfacePanel>::handle(self, resp);
 
-                ui.add_space(2f32);
+            ui.add_space(2f32);
 
-                ui.horizontal(|ui| {
-                    use midi::port::Direction;
+            ui.horizontal(|ui| {
+                use midi::port::Direction;
 
-                    let resp_in = self.ports_panel.lock().unwrap().show(Direction::In, ui);
-                    ui.add_space(20f32);
-                    let resp_out = self.ports_panel.lock().unwrap().show(Direction::Out, ui);
+                let resp_in = self.ports_panel.lock().unwrap().show(Direction::In, ui);
+                ui.add_space(20f32);
+                let resp_out = self.ports_panel.lock().unwrap().show(Direction::Out, ui);
 
-                    Dispatcher::<super::PortsPanel>::handle(self, resp_in.or(resp_out));
-                });
-
-                ui.add_space(2f32);
-                ui.separator();
-
-                let resp = self.player_panel.lock().unwrap().show(ui);
-                Dispatcher::<super::PlayerPanel>::handle(self, resp);
+                Dispatcher::<super::PortsPanel>::handle(self, resp_in.or(resp_out));
             });
 
+            ui.add_space(2f32);
+        });
+
+        egui::TopBottomPanel::bottom("status-area").show(ctx, |ui| {
             self.pop_err();
             if let Some(ref err) = self.last_err {
                 ui.add_space(5f32);
@@ -127,6 +123,11 @@ impl epi::App for App {
                     }
                 });
             }
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let resp = self.player_panel.lock().unwrap().show(ui);
+            Dispatcher::<super::PlayerPanel>::handle(self, resp);
         });
     }
 

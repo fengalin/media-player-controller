@@ -118,6 +118,12 @@ impl<'a> Controller<'a> {
             })
     }
 
+    fn display_err(&mut self, err: Error) {
+        log::error!("{err}");
+        let _ = self.err_tx.send(err);
+        self.must_repaint = true;
+    }
+
     fn handle_request(&mut self, request: app::Request) -> Result<ControlFlow<(), ()>, Error> {
         use app::Request::*;
 
@@ -329,8 +335,7 @@ impl<'a> Controller<'a> {
                     log::info!("{err}");
                     let _ = self.scan_next();
                 } else {
-                    log::error!("{err}");
-                    let _ = self.err_tx.send(err);
+                    self.display_err(err);
                 }
             }
         }
@@ -366,8 +371,7 @@ impl<'a> Controller<'a> {
 
                 let ctrl_surf = self.ctrl_surf_panel.lock().unwrap().cur.clone();
                 let err = Error::ControlSurfaceNotFound(ctrl_surf);
-                log::error!("{err}");
-                let _ = self.err_tx.send(err);
+                self.display_err(err);
 
                 // FIXME re-enable UI
 
@@ -395,9 +399,9 @@ impl<'a> Controller<'a> {
                 self.player_panel.lock().unwrap().update_track(track);
                 self.send_to_ctrl_surf(event);
             }
-            Data(Timecode(tc)) => {
+            Data(Position(pos)) => {
                 log::trace!("Player: {event:?}");
-                self.player_panel.lock().unwrap().update_position(tc);
+                self.player_panel.lock().unwrap().update_position(pos);
                 self.send_to_ctrl_surf(event);
                 self.must_repaint = true;
             }
@@ -449,10 +453,7 @@ impl<'a> Controller<'a> {
                         Ok(request) => match self.handle_request(request) {
                             Ok(ControlFlow::Continue(())) => (),
                             Ok(ControlFlow::Break(())) => break,
-                            Err(err) => {
-                                log::error!("{err}");
-                                let _ = self.err_tx.send(err);
-                            }
+                            Err(err) => self.display_err(err),
                         },
                         Err(err) => {
                             log::error!("Error UI request channel: {err}");
@@ -464,10 +465,7 @@ impl<'a> Controller<'a> {
                     match pevent {
                         Ok(pevent) => match self.handle_player_event(pevent) {
                             Ok(()) => (),
-                            Err(err) => {
-                                log::error!("{err}");
-                                let _ = self.err_tx.send(err);
-                            }
+                            Err(err) => self.display_err(err),
                         },
                         Err(err) => {
                             log::error!("Error player event channel: {err}");
@@ -479,10 +477,7 @@ impl<'a> Controller<'a> {
                     match midi_msg {
                         Ok(midi_msg) => match self.handle_midi_msg(midi_msg) {
                             Ok(()) => (),
-                            Err(err) => {
-                                log::error!("{err}");
-                                let _ = self.err_tx.send(err);
-                            }
+                            Err(err) => self.display_err(err),
                         },
                         Err(err) => {
                             log::error!("Error MIDI msg channel: {err}");

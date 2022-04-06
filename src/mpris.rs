@@ -189,7 +189,8 @@ impl<'a> Players<'a> {
         }
 
         if let Ok(pos) = player.get_position() {
-            self.evt_tx.send(ctrl_surf::Timecode::from(pos).into())?;
+            self.evt_tx
+                .send(ctrl_surf::event::Data::Position(pos).into())?;
         }
 
         Ok(())
@@ -267,7 +268,7 @@ impl<'a> Players<'a> {
 
             let pos = tick.progress.position();
             if last_pos != pos {
-                evt_tx.send(ctrl_surf::Timecode::from(pos).into())?;
+                evt_tx.send(ctrl_surf::event::Data::Position(pos).into())?;
                 last_pos = pos;
             }
         }
@@ -322,7 +323,9 @@ impl From<mpris::Metadata> for ctrl_surf::Track {
 
         ctrl_surf::Track {
             artist,
+            album: meta.album_name().map(Arc::from),
             title: meta.title().map(Arc::from),
+            duration: meta.length(),
             image_url,
         }
     }

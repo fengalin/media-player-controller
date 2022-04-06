@@ -60,7 +60,7 @@ impl From<Mixer> for AppEvent {
 #[derive(Debug)]
 pub enum Data {
     Track(super::Track),
-    Timecode(super::Timecode),
+    Position(std::time::Duration),
 }
 
 impl From<Data> for AppEvent {
@@ -78,17 +78,5 @@ impl From<super::Track> for Data {
 impl From<super::Track> for AppEvent {
     fn from(track: super::Track) -> Self {
         AppEvent::from(Data::from(track))
-    }
-}
-
-impl From<super::Timecode> for Data {
-    fn from(tc: super::Timecode) -> Self {
-        Self::Timecode(tc)
-    }
-}
-
-impl From<super::Timecode> for AppEvent {
-    fn from(tc: super::Timecode) -> Self {
-        AppEvent::from(Data::from(tc))
     }
 }

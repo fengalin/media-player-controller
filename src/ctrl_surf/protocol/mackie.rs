@@ -1,11 +1,11 @@
 use once_cell::sync::Lazy;
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use crate::{
     ctrl_surf::{
         self,
         event::{self, *},
-        Error, Msg,
+        Error, Msg, Timecode,
     },
     midi,
 };
@@ -220,7 +220,7 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 }
 
                 match data {
-                    Timecode(tc) => return self.app_timecode(tc),
+                    Position(pos) => return self.app_position(pos),
                     Track(_) => (),
                 }
             }
@@ -376,11 +376,11 @@ impl Mackie {
         }
     }
 
-    fn app_timecode(&mut self, tc: ctrl_surf::Timecode) -> Vec<Msg> {
+    fn app_position(&mut self, pos: Duration) -> Vec<Msg> {
         use display_7_seg::*;
 
         let mut list = Vec::new();
-        let tc = TimecodeBreakDown::from(tc);
+        let tc = TimecodeBreakDown::from(Timecode::from(pos));
 
         for (idx, (&last_digit, digit)) in self.last_tc.0.iter().zip(tc.0).enumerate() {
             if last_digit != digit {
