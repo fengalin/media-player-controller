@@ -195,17 +195,13 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
             }
             NewApp(app) => {
                 let msg_list = if app != self.app && self.state != State::PendingAppData {
-                    log::debug!("New application {app}. Reseting and requesting data");
-
-                    let mut msg_list = self.reset();
+                    log::debug!("New application {app}");
 
                     self.app = app;
                     self.state = State::PendingAppData;
                     // FIXME send player name to device
 
-                    msg_list.push(CtrlSurfEvent::DataRequest.into());
-
-                    msg_list
+                    CtrlSurfEvent::DataRequest.to_app().into()
                 } else {
                     Msg::none()
                 };
@@ -222,6 +218,15 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 match data {
                     Position(pos) => return self.app_position(pos),
                     Track(_) => (),
+                    PlaybackStatus(status) => {
+                        use crate::ctrl_surf::data::PlaybackStatus::*;
+
+                        match status {
+                            Playing => return self.app_play(),
+                            Paused => return self.app_pause(),
+                            Stopped => return self.reset(),
+                        }
+                    }
                 }
             }
         }

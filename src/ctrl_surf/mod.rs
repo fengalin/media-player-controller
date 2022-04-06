@@ -1,5 +1,5 @@
 pub mod data;
-pub use data::{Timecode, Track};
+pub use data::{PlaybackStatus, Timecode, Track};
 
 mod device;
 

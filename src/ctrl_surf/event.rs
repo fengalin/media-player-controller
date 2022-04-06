@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 #[derive(Debug)]
 pub enum CtrlSurfEvent {
@@ -15,7 +15,7 @@ pub enum AppEvent {
     NewApp(Arc<str>),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Transport {
     Play,
     Pause,
@@ -25,6 +25,7 @@ pub enum Transport {
     Next,
     StepForward,
     StepBackward,
+    SetPosition(Duration),
 }
 
 impl From<Transport> for CtrlSurfEvent {
@@ -61,6 +62,7 @@ impl From<Mixer> for AppEvent {
 pub enum Data {
     Track(super::Track),
     Position(std::time::Duration),
+    PlaybackStatus(super::PlaybackStatus),
 }
 
 impl From<Data> for AppEvent {

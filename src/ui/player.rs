@@ -13,11 +13,16 @@ const STORAGE_PLAYER: &str = "player";
 pub enum Response {
     Use(Arc<str>),
     CheckingList,
+    Position(Duration),
+    PlayPause,
+    Previous,
+    Next,
 }
 
 pub struct PlayerPanel {
     list: Vec<Arc<str>>,
     cur: Arc<str>,
+    is_playing: bool,
     artist: Option<Arc<str>>,
     album: Option<Arc<str>>,
     title: Option<Arc<str>>,
@@ -34,6 +39,7 @@ impl PlayerPanel {
         Self {
             list: Vec::new(),
             cur: NO_PLAYER.clone(),
+            is_playing: false,
             artist: None,
             album: None,
             title: None,
@@ -101,10 +107,21 @@ impl PlayerPanel {
                                     self.position_str.as_ref().map_or("--:--", String::as_str),
                                     self.duration_str.as_ref().map_or("--:--", String::as_str),
                                 ));
-                                ui.button("⏮");
-                                ui.button("■");
-                                ui.button("▶");
-                                ui.button("⏭");
+
+                                if ui.button("⏮").clicked() {
+                                    resp = Some(Previous);
+                                }
+                                let play_pause_btn = if self.is_playing {
+                                    ui.button("⏸")
+                                } else {
+                                    ui.button("▶")
+                                };
+                                if play_pause_btn.clicked() {
+                                    resp = Some(PlayPause);
+                                }
+                                if ui.button("⏭").clicked() {
+                                    resp = Some(Next);
+                                }
                             });
                         });
 
@@ -113,10 +130,18 @@ impl PlayerPanel {
                         .frame(no_stroke.margin(margin))
                         .show_inside(ui, |ui| {
                             ui.spacing_mut().slider_width = ui.available_size().x;
-                            ui.add(
-                                egui::Slider::new(&mut pos, 0..=self.duration.as_secs())
-                                    .show_value(false),
-                            );
+                            let mut dur = self.duration.as_secs();
+                            if dur == 0 {
+                                // Force to one otherwise the slider is centered.
+                                dur = 1;
+                            }
+                            if ui
+                                .add(egui::Slider::new(&mut pos, 0..=dur).show_value(false))
+                                .clicked()
+                            {
+                                self.position = Duration::from_secs(pos);
+                                resp = Some(Position(self.position));
+                            }
                         });
                 });
             });
@@ -241,6 +266,15 @@ impl PlayerPanel {
     pub fn update_position(&mut self, pos: Duration) {
         self.position = pos;
         self.position_str = Some(format!("{}", Timecode::from(pos)));
+    }
+
+    pub fn set_playback_status(&mut self, is_playing: bool) {
+        self.is_playing = is_playing;
+    }
+
+    pub fn play_pause(&mut self) {
+        self.is_playing = !self.is_playing;
+        dbg!(self.is_playing);
     }
 
     pub fn reset_data(&mut self) {

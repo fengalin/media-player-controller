@@ -165,6 +165,11 @@ impl<'a> Controller<'a> {
             HaveContext(egui_ctx) => {
                 self.player_panel.lock().unwrap().have_context(egui_ctx);
             }
+            Transport(tevt) => {
+                log::debug!("UI Player: {tevt:?}");
+                // Not sure why, this causes spurious DBus errors.
+                let _ = self.players.handle_event(tevt);
+            }
         }
 
         Ok(ControlFlow::Continue(()))
@@ -383,30 +388,73 @@ impl<'a> Controller<'a> {
 
 /// Mpris Player stuff.
 impl<'a> Controller<'a> {
-    fn handle_player_event(&mut self, event: AppEvent) -> Result<(), Error> {
-        use ctrl_surf::event::{AppEvent::*, Data::*, Transport::Stop};
+    fn handle_mpris_event(&mut self, event: AppEvent) -> Result<(), Error> {
+        use ctrl_surf::event::{AppEvent::*, Data::*, Transport::*};
 
         match event {
+            Transport(PlayPause) => {
+                log::info!("MPRIS Player: PlayPause");
+                self.send_to_ctrl_surf(PlayPause);
+                self.player_panel.lock().unwrap().play_pause();
+                self.must_repaint = true;
+            }
+            Transport(Play) => {
+                log::info!("MPRIS Player: Play");
+                self.send_to_ctrl_surf(Play);
+                self.player_panel.lock().unwrap().set_playback_status(true);
+                self.must_repaint = true;
+            }
+            Transport(Pause) => {
+                log::info!("MPRIS Player: Pause");
+                self.send_to_ctrl_surf(Pause);
+                self.player_panel.lock().unwrap().set_playback_status(false);
+                self.must_repaint = true;
+            }
+            Transport(Previous) => {
+                log::info!("MPRIS Player: Previous");
+                self.send_to_ctrl_surf(Previous);
+                self.player_panel.lock().unwrap().set_playback_status(true);
+                self.must_repaint = true;
+            }
+            Transport(Next) => {
+                log::info!("MPRIS Player: Next");
+                self.send_to_ctrl_surf(Next);
+                self.player_panel.lock().unwrap().set_playback_status(true);
+                self.must_repaint = true;
+            }
             Transport(Stop) => {
-                log::info!("Player: Stop");
+                log::info!("MPRIS Player: Stop");
                 self.send_to_ctrl_surf(Stop);
                 self.refresh_players()?;
-                self.player_panel.lock().unwrap().reset_data();
+                {
+                    let mut player_panel = self.player_panel.lock().unwrap();
+                    player_panel.reset_data();
+                    player_panel.set_playback_status(false);
+                }
                 self.must_repaint = true;
             }
             Data(Track(ref track)) => {
-                log::debug!("Player: Track {:?} - {:?}", track.artist, track.title);
+                log::debug!("MPRIS Player: Track {:?} - {:?}", track.artist, track.title);
                 self.player_panel.lock().unwrap().update_track(track);
                 self.send_to_ctrl_surf(event);
             }
             Data(Position(pos)) => {
-                log::trace!("Player: {event:?}");
+                log::trace!("MPRIS Player: {event:?}");
                 self.player_panel.lock().unwrap().update_position(pos);
                 self.send_to_ctrl_surf(event);
                 self.must_repaint = true;
             }
+            Data(PlaybackStatus(status)) => {
+                log::trace!("MPRIS Player: {event:?}");
+                self.player_panel
+                    .lock()
+                    .unwrap()
+                    .set_playback_status(status.is_playing());
+                self.send_to_ctrl_surf(event);
+                self.must_repaint = true;
+            }
             NewApp(_) => {
-                log::trace!("Player: {event:?}");
+                log::trace!("MPRIS Player: {event:?}");
                 let is_connected = self
                     .ctrl_surf
                     .as_ref()
@@ -418,7 +466,7 @@ impl<'a> Controller<'a> {
                 }
             }
             _ => {
-                log::debug!("Player: {event:?}");
+                log::debug!("MPRIS Player: {event:?}");
                 self.send_to_ctrl_surf(event);
             }
         }
@@ -463,7 +511,7 @@ impl<'a> Controller<'a> {
                 }
                 recv(evt_rx) -> pevent => {
                     match pevent {
-                        Ok(pevent) => match self.handle_player_event(pevent) {
+                        Ok(pevent) => match self.handle_mpris_event(pevent) {
                             Ok(()) => (),
                             Err(err) => self.display_err(err),
                         },

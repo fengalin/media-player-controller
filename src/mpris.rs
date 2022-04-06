@@ -151,6 +151,12 @@ impl<'a> Players<'a> {
                     Next => player.next()?,
                     StepForward => todo!(),
                     StepBackward => todo!(),
+                    SetPosition(pos) => {
+                        let cur = player.get_position()?;
+                        let target = pos.as_micros() as i64 - cur.as_micros() as i64;
+                        dbg!(target);
+                        player.seek(target)?;
+                    }
                 }
             }
             Mixer(event) => {

@@ -3,7 +3,7 @@ use eframe::{egui, epi};
 use std::sync::{Arc, Mutex};
 
 use super::{controller, Dispatcher};
-use crate::{midi, mpris};
+use crate::{ctrl_surf, midi, mpris};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -36,6 +36,13 @@ pub enum Request {
     Shutdown,
     HaveFrame(epi::Frame),
     HaveContext(egui::Context),
+    Transport(ctrl_surf::event::Transport),
+}
+
+impl From<ctrl_surf::event::Transport> for Request {
+    fn from(evt: ctrl_surf::event::Transport) -> Self {
+        Self::Transport(evt)
+    }
 }
 
 pub struct App {

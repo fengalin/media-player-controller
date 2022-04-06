@@ -1,4 +1,4 @@
-use super::{app, ctrl_surf, player, port, App};
+use super::{app::Request, ctrl_surf, player, port, App};
 
 pub struct Dispatcher<T>(std::marker::PhantomData<*const T>);
 
@@ -11,13 +11,13 @@ impl Dispatcher<super::ControlSurfacePanel> {
 
             match resp {
                 Use(ctrl_surf) => {
-                    app.send_req(app::Request::UseControlSurface(ctrl_surf));
+                    app.send_req(Request::UseControlSurface(ctrl_surf));
                 }
                 Unuse => {
-                    app.send_req(app::Request::NoControlSurface);
+                    app.send_req(Request::NoControlSurface);
                 }
                 Scan => {
-                    app.send_req(app::Request::ScanControlSurface);
+                    app.send_req(Request::ScanControlSurface);
                 }
             }
         }
@@ -30,14 +30,14 @@ impl Dispatcher<super::PortsPanel> {
             use port::Response::*;
 
             app.clear_last_err();
-            app.send_req(app::Request::RefreshPorts);
+            app.send_req(Request::RefreshPorts);
 
             match resp {
                 Connect((direction, port_name)) => {
-                    app.send_req(app::Request::ConnectPort((direction, port_name)));
+                    app.send_req(Request::ConnectPort((direction, port_name)));
                 }
                 Disconnect(direction) => {
-                    app.send_req(app::Request::DisconnectPort(direction));
+                    app.send_req(Request::DisconnectPort(direction));
                 }
                 CheckingList => (), // only refresh ports & clear last_err
             }
@@ -51,14 +51,28 @@ impl Dispatcher<super::PlayerPanel> {
             use player::Response::*;
 
             app.clear_last_err();
-            app.send_req(app::Request::RefreshPlayers);
 
-            match resp {
-                Use(player_name) => {
-                    app.send_req(app::Request::UsePlayer(player_name));
-                }
-                CheckingList => (), // only refresh ports & clear last_err
+            if let Use(_) = resp {
+                app.send_req(Request::RefreshPlayers);
             }
+
+            app.send_req(resp.into());
+        }
+    }
+}
+
+impl From<player::Response> for Request {
+    fn from(resp: player::Response) -> Self {
+        use crate::ctrl_surf::event::Transport;
+        use player::Response::*;
+
+        match resp {
+            Use(player_name) => Request::UsePlayer(player_name),
+            CheckingList => Request::RefreshPlayers,
+            Position(pos) => Transport::SetPosition(pos).into(),
+            PlayPause => Transport::PlayPause.into(),
+            Previous => Transport::Previous.into(),
+            Next => Transport::Next.into(),
         }
     }
 }

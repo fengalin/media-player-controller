@@ -85,3 +85,16 @@ impl fmt::Display for Timecode {
         write!(f, "{}", buf_str)
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum PlaybackStatus {
+    Playing,
+    Paused,
+    Stopped,
+}
+
+impl PlaybackStatus {
+    pub fn is_playing(self) -> bool {
+        matches!(self, Self::Playing)
+    }
+}
