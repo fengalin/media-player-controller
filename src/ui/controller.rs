@@ -167,8 +167,11 @@ impl<'a> Controller<'a> {
             }
             Transport(tevt) => {
                 log::debug!("UI Player: {tevt:?}");
-                // Not sure why, this causes spurious DBus errors.
                 let _ = self.players.handle_event(tevt);
+                if let ctrl_surf::event::Transport::SetPosition(_) = tevt {
+                    self.player_panel.lock().unwrap().reset_pending_seek();
+                    self.must_repaint = true;
+                }
             }
         }
 

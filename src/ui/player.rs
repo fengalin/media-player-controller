@@ -30,6 +30,7 @@ pub struct PlayerPanel {
     position_str: Option<String>,
     duration: Duration,
     duration_str: Option<String>,
+    is_pending_seek: bool,
     texture: Option<(Arc<str>, egui::TextureHandle)>,
     egui_ctx: Option<egui::Context>,
 }
@@ -47,6 +48,7 @@ impl PlayerPanel {
             position_str: None,
             duration: Duration::ZERO,
             duration_str: None,
+            is_pending_seek: false,
             texture: None,
             egui_ctx: None,
         }
@@ -137,9 +139,11 @@ impl PlayerPanel {
                             }
                             if ui
                                 .add(egui::Slider::new(&mut pos, 0..=dur).show_value(false))
-                                .clicked()
+                                .changed()
+                                && !self.is_pending_seek
                             {
                                 self.position = Duration::from_secs(pos);
+                                self.is_pending_seek = true;
                                 resp = Some(Position(self.position));
                             }
                         });
@@ -264,8 +268,16 @@ impl PlayerPanel {
     }
 
     pub fn update_position(&mut self, pos: Duration) {
+        if self.is_pending_seek {
+            return;
+        }
+
         self.position = pos;
         self.position_str = Some(format!("{}", Timecode::from(pos)));
+    }
+
+    pub fn reset_pending_seek(&mut self) {
+        self.is_pending_seek = false;
     }
 
     pub fn set_playback_status(&mut self, is_playing: bool) {
@@ -274,7 +286,6 @@ impl PlayerPanel {
 
     pub fn play_pause(&mut self) {
         self.is_playing = !self.is_playing;
-        dbg!(self.is_playing);
     }
 
     pub fn reset_data(&mut self) {
@@ -284,6 +295,7 @@ impl PlayerPanel {
         self.position_str = None;
         self.duration = Duration::ZERO;
         self.duration_str = None;
+        self.is_pending_seek = false;
         self.texture = None;
     }
 

@@ -154,7 +154,6 @@ impl<'a> Players<'a> {
                     SetPosition(pos) => {
                         let cur = player.get_position()?;
                         let target = pos.as_micros() as i64 - cur.as_micros() as i64;
-                        dbg!(target);
                         player.seek(target)?;
                     }
                 }
