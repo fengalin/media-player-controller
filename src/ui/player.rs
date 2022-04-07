@@ -58,7 +58,6 @@ impl PlayerPanel {
         use Response::*;
 
         let mut resp = None;
-
         let no_stroke = egui::Frame::default().stroke(egui::Stroke::none());
 
         let mut margin = ui.spacing().window_margin;
@@ -154,38 +153,44 @@ impl PlayerPanel {
         margin.left = 0.0;
         margin.right = 0.0;
         margin.top *= 1.5;
-        margin.bottom = 0.0;
+        margin.bottom = 0.5;
         egui::CentralPanel::default()
             .frame(no_stroke.margin(margin))
             .show_inside(ui, |ui| {
                 ui.spacing_mut().item_spacing.x *= 2.0;
+                let av_size = ui.available_size();
 
-                ui.columns(2, |columns| {
-                    if let Some((_, ref texture)) = self.texture {
-                        let img_size = texture.size_vec2();
+                if let Some((_, ref texture)) = self.texture {
+                    egui::SidePanel::left("player-track-image")
+                        .frame(no_stroke)
+                        .show_inside(ui, |ui| {
+                            let img_size = texture.size_vec2();
 
-                        let av_size = columns[0].available_size();
-                        let mut width = av_size.x.min(img_size.x);
-                        let mut height = img_size.y * width / img_size.x;
-                        if height > av_size.y {
-                            height = av_size.y;
-                            width = img_size.x * height / img_size.y;
-                        }
+                            let mut width = (0.667 * av_size.x).min(img_size.x);
+                            let mut height = img_size.y * width / img_size.x;
+                            if height > av_size.y {
+                                height = av_size.y;
+                                width = img_size.x * height / img_size.y;
+                            }
 
-                        columns[0].image(
-                            texture,
-                            egui::Vec2::new(width.min(img_size.x), height.min(img_size.y)),
-                        );
-                    }
+                            ui.image(
+                                texture,
+                                egui::Vec2::new(width.min(img_size.x), height.min(img_size.y)),
+                            );
+                        });
+                }
 
-                    columns[1].vertical(|ui| {
-                        ui.heading(self.artist.as_ref().map_or("", Arc::as_ref));
-                        ui.separator();
-                        ui.heading(self.album.as_ref().map_or("", Arc::as_ref));
-                        ui.add_space(20f32);
-                        ui.label(self.title.as_ref().map_or("", Arc::as_ref));
+                egui::CentralPanel::default()
+                    .frame(no_stroke)
+                    .show_inside(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.heading(self.artist.as_ref().map_or("", Arc::as_ref));
+                            ui.separator();
+                            ui.heading(self.album.as_ref().map_or("", Arc::as_ref));
+                            ui.add_space(20f32);
+                            ui.label(self.title.as_ref().map_or("", Arc::as_ref));
+                        })
                     });
-                });
             });
 
         resp
