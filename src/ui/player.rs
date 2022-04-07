@@ -237,38 +237,41 @@ impl PlayerPanel {
         self.duration = track.duration.unwrap_or(Duration::ZERO);
         self.duration_str = track.duration.map(Timecode::from).map(|tc| format!("{tc}"));
 
-        if let Some(ref url) = track.image_url {
-            if self.texture.as_ref().map_or(true, |(cur, _)| cur != url) {
-                if let Some(ref ctx) = self.egui_ctx {
-                    let path = url.trim_start_matches("file://");
-                    let res = image::io::Reader::open(path)
-                        .map_err(|err| {
-                            log::warn!("Failed to read image: {err}");
-                        })
-                        .and_then(|reader| {
-                            reader.decode().map_err(|err| {
-                                log::warn!("Failed to decode image: {err}");
+        match track.image_url {
+            Some(ref url) => {
+                if self.texture.as_ref().map_or(true, |(cur, _)| cur != url) {
+                    if let Some(ref ctx) = self.egui_ctx {
+                        let path = url.trim_start_matches("file://");
+                        let res = image::io::Reader::open(path)
+                            .map_err(|err| {
+                                log::warn!("Failed to read image: {err}");
                             })
-                        });
+                            .and_then(|reader| {
+                                reader.decode().map_err(|err| {
+                                    log::warn!("Failed to decode image: {err}");
+                                })
+                            });
 
-                    let image = match res {
-                        Ok(image) => image,
-                        Err(()) => {
-                            self.texture = None;
-                            return;
-                        }
-                    };
+                        let image = match res {
+                            Ok(image) => image,
+                            Err(()) => {
+                                self.texture = None;
+                                return;
+                            }
+                        };
 
-                    let size = [image.width() as _, image.height() as _];
-                    let image_buffer = image.to_rgba8();
-                    let pixels = image_buffer.as_flat_samples();
-                    let color_image =
-                        egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                        let size = [image.width() as _, image.height() as _];
+                        let image_buffer = image.to_rgba8();
+                        let pixels = image_buffer.as_flat_samples();
+                        let color_image =
+                            egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
 
-                    self.texture =
-                        Some((url.clone(), ctx.load_texture("track-image", color_image)));
+                        self.texture =
+                            Some((url.clone(), ctx.load_texture("track-image", color_image)));
+                    }
                 }
             }
+            None => self.texture = None,
         }
     }
 

@@ -200,6 +200,22 @@ impl<'a> Players<'a> {
 
         Ok(())
     }
+
+    pub fn send_track_meta(&self) -> Result<(), Error> {
+        let player_name = match self.cur {
+            Some(ref cur) => cur.0.clone(),
+            None => return Ok(()),
+        };
+
+        let finder = mpris::PlayerFinder::new()?;
+        let player = finder.find_by_name(player_name.as_ref())?;
+
+        if let Ok(meta) = player.get_metadata() {
+            self.evt_tx.send(ctrl_surf::Track::from(meta).into())?;
+        }
+
+        Ok(())
+    }
 }
 
 impl<'a> Players<'a> {

@@ -13,6 +13,7 @@ use crate::{
 };
 
 const CTRL_SURF_CONNECTION_TIMEOUT: Duration = Duration::from_millis(250);
+const TRACK_META_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 pub struct Spawner {
     pub req_rx: channel::Receiver<app::Request>,
@@ -41,6 +42,7 @@ impl Spawner {
 #[derive(Clone, Copy, Debug)]
 enum DelayedEvent {
     CtrlSurfConnectionTimeout,
+    TrackMetaRetry,
 }
 
 struct Controller<'a> {
@@ -58,6 +60,7 @@ struct Controller<'a> {
 
     players: mpris::Players<'a>,
     player_panel: Arc<Mutex<super::PlayerPanel>>,
+    player_meta_retry: Option<timer::Guard>,
 
     must_repaint: bool,
     frame: Option<epi::Frame>,
@@ -100,6 +103,7 @@ impl<'a> Controller<'a> {
             ports_panel,
             players,
             player_panel,
+            player_meta_retry: None,
 
             must_repaint: false,
             frame: None,
@@ -437,6 +441,14 @@ impl<'a> Controller<'a> {
                 self.must_repaint = true;
             }
             Data(Track(ref track)) => {
+                let was_retrying = self.player_meta_retry.take().is_some();
+                if !was_retrying && track.image_url.is_none() {
+                    self.player_meta_retry = Some(
+                        self.delay_event(DelayedEvent::TrackMetaRetry, TRACK_META_RETRY_DELAY),
+                    );
+                    log::debug!("MPRIS Player: Track without image, will try again");
+                    return Ok(());
+                }
                 log::debug!("MPRIS Player: Track {:?} - {:?}", track.artist, track.title);
                 self.player_panel.lock().unwrap().update_track(track);
                 self.send_to_ctrl_surf(event);
@@ -542,6 +554,9 @@ impl<'a> Controller<'a> {
                         Ok(devt) => match devt {
                             CtrlSurfConnectionTimeout => {
                                 self.ctrl_surf_connection_timeout();
+                            }
+                            TrackMetaRetry => {
+                                let _ = self.players.send_track_meta();
                             }
                         },
                         Err(err) => {
