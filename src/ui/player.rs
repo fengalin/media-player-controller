@@ -184,11 +184,17 @@ impl PlayerPanel {
                     .frame(no_stroke)
                     .show_inside(ui, |ui| {
                         ui.vertical(|ui| {
-                            ui.heading(self.artist.as_ref().map_or("", Arc::as_ref));
-                            ui.separator();
-                            ui.heading(self.album.as_ref().map_or("", Arc::as_ref));
-                            ui.add_space(20f32);
-                            ui.label(self.title.as_ref().map_or("", Arc::as_ref));
+                            if let Some(artist) = self.artist.as_ref() {
+                                ui.heading(artist.as_ref());
+                                ui.separator();
+                            }
+                            if let Some(album) = self.album.as_ref() {
+                                ui.heading(album.as_ref());
+                                ui.add_space(20f32);
+                            }
+                            if let Some(title) = self.title.as_ref() {
+                                ui.label(title.as_ref());
+                            }
                         })
                     });
             });
