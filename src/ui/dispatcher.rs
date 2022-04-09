@@ -63,13 +63,15 @@ impl Dispatcher<super::PlayerPanel> {
 
 impl From<player::Response> for Request {
     fn from(resp: player::Response) -> Self {
-        use crate::ctrl_surf::event::Transport;
+        use crate::ctrl_surf::event::{Mixer, Transport};
         use player::Response::*;
 
         match resp {
             Use(player_name) => Request::UsePlayer(player_name),
             CheckingList => Request::RefreshPlayers,
             Position(pos) => Transport::SetPosition(pos).into(),
+            Mute => Mixer::Mute.into(),
+            UnMute => Mixer::Unmute.into(),
             PlayPause => Transport::PlayPause.into(),
             Previous => Transport::Previous.into(),
             Next => Transport::Next.into(),

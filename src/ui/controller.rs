@@ -8,7 +8,7 @@ use std::{
 
 use super::app::{self, Error};
 use crate::{
-    ctrl_surf::{self, AppEvent, CtrlSurfEvent},
+    ctrl_surf::{self, AppEvent},
     midi, mpris,
 };
 
@@ -86,7 +86,10 @@ impl<'a> Controller<'a> {
                 let _ = err_tx.send(err.into());
             })?;
 
-        let (players, evt_rx) = mpris::Players::new();
+        let (players, evt_rx) = mpris::Players::try_new().map_err(|err| {
+            log::error!("Error MPRIS players manager: {}", err);
+            let _ = err_tx.send(err.into());
+        })?;
 
         Self {
             err_tx,
@@ -153,14 +156,7 @@ impl<'a> Controller<'a> {
                 self.send_to_ctrl_surf(ctrl_surf::event::Transport::Stop);
             }
             ScanControlSurface => self.start_scan(),
-            UsePlayer(player_name) => {
-                self.players.set_cur(player_name).unwrap();
-                {
-                    let mut player_panel = self.player_panel.lock().unwrap();
-                    player_panel.update_players(&self.players);
-                    player_panel.reset_data();
-                }
-            }
+            UsePlayer(player_name) => self.players.set_cur(player_name)?,
             RefreshPlayers => self.refresh_players()?,
             Shutdown => return Ok(ControlFlow::Break(())),
             HaveFrame(egui_frame) => {
@@ -168,6 +164,10 @@ impl<'a> Controller<'a> {
             }
             HaveContext(egui_ctx) => {
                 self.player_panel.lock().unwrap().have_context(egui_ctx);
+            }
+            Mixer(mevt) => {
+                log::debug!("UI Player: {mevt:?}");
+                let _ = self.players.handle_event(mevt);
             }
             Transport(tevt) => {
                 log::debug!("UI Player: {tevt:?}");
@@ -239,20 +239,8 @@ impl<'a> Controller<'a> {
         for msg in resp {
             match msg {
                 ToApp(event) => {
-                    use CtrlSurfEvent::*;
-
                     log::debug!("Ctrl surf: {event:?}");
-                    match event {
-                        Transport(_) => self.players.handle_event(event)?,
-                        Mixer(ref mixer) => {
-                            use ctrl_surf::event::Mixer::*;
-                            match mixer {
-                                Volume(_) => self.players.handle_event(event)?,
-                                Mute => log::warn!("Attempt to mute (not implemented)"),
-                            }
-                        }
-                        DataRequest => self.players.handle_event(event)?,
-                    }
+                    self.players.handle_event(event)?;
                 }
                 ToDevice(msg) => {
                     if self.midi_ports.are_connected() {
@@ -395,52 +383,61 @@ impl<'a> Controller<'a> {
 
 /// Mpris Player stuff.
 impl<'a> Controller<'a> {
-    fn handle_mpris_event(&mut self, event: AppEvent) -> Result<(), Error> {
-        use ctrl_surf::event::{AppEvent::*, Data::*, Transport::*};
+    fn handle_mpris_event(&mut self, event: crate::mpris::Event) -> Result<(), Error> {
+        use crate::mpris::Event;
+        use ctrl_surf::event::{AppEvent::*, Data::*, Mixer::*, Transport::*};
 
         match event {
-            Transport(PlayPause) => {
+            Event::Transport(PlayPause) => {
                 log::info!("MPRIS Player: PlayPause");
                 self.send_to_ctrl_surf(PlayPause);
                 self.player_panel.lock().unwrap().play_pause();
                 self.must_repaint = true;
             }
-            Transport(Play) => {
+            Event::Transport(Play) => {
                 log::info!("MPRIS Player: Play");
                 self.send_to_ctrl_surf(Play);
                 self.player_panel.lock().unwrap().set_playback_status(true);
                 self.must_repaint = true;
             }
-            Transport(Pause) => {
+            Event::Transport(Pause) => {
                 log::info!("MPRIS Player: Pause");
                 self.send_to_ctrl_surf(Pause);
                 self.player_panel.lock().unwrap().set_playback_status(false);
                 self.must_repaint = true;
             }
-            Transport(Previous) => {
+            Event::Transport(Previous) => {
                 log::info!("MPRIS Player: Previous");
                 self.send_to_ctrl_surf(Previous);
                 self.player_panel.lock().unwrap().set_playback_status(true);
                 self.must_repaint = true;
             }
-            Transport(Next) => {
+            Event::Transport(Next) => {
                 log::info!("MPRIS Player: Next");
                 self.send_to_ctrl_surf(Next);
                 self.player_panel.lock().unwrap().set_playback_status(true);
                 self.must_repaint = true;
             }
-            Transport(Stop) => {
+            Event::Transport(Stop) => {
                 log::info!("MPRIS Player: Stop");
                 self.send_to_ctrl_surf(Stop);
                 self.refresh_players()?;
                 {
                     let mut player_panel = self.player_panel.lock().unwrap();
-                    player_panel.reset_data();
+                    player_panel.reset();
                     player_panel.set_playback_status(false);
                 }
                 self.must_repaint = true;
             }
-            Data(Track(ref track)) => {
+            Event::Transport(SetPosition(pos)) => {
+                log::info!("MPRIS Player: SetPosition {pos:?}");
+                self.send_to_ctrl_surf(SetPosition(pos));
+            }
+            Event::Transport(tevt) => {
+                log::debug!("MPRIS Player: Transport {tevt:?}");
+                self.send_to_ctrl_surf(Transport(tevt));
+            }
+            Event::Data(Track(track)) => {
                 let was_retrying = self.player_meta_retry.take().is_some();
                 if !was_retrying && track.image_url.is_none() {
                     self.player_meta_retry = Some(
@@ -450,26 +447,31 @@ impl<'a> Controller<'a> {
                     return Ok(());
                 }
                 log::debug!("MPRIS Player: Track {:?} - {:?}", track.artist, track.title);
-                self.player_panel.lock().unwrap().update_track(track);
-                self.send_to_ctrl_surf(event);
+                self.player_panel.lock().unwrap().update_track(&track);
+                self.send_to_ctrl_surf(Track(track));
             }
-            Data(Position(pos)) => {
-                log::trace!("MPRIS Player: {event:?}");
+            Event::Data(Position(pos)) => {
+                log::trace!("MPRIS Player: Position {pos:?}");
                 self.player_panel.lock().unwrap().update_position(pos);
-                self.send_to_ctrl_surf(event);
+                self.send_to_ctrl_surf(Position(pos));
                 self.must_repaint = true;
             }
-            Data(PlaybackStatus(status)) => {
-                log::trace!("MPRIS Player: {event:?}");
+            Event::Data(PlaybackStatus(status)) => {
+                log::debug!("MPRIS Player: PlaybackStatus {status:?}");
                 self.player_panel
                     .lock()
                     .unwrap()
                     .set_playback_status(status.is_playing());
-                self.send_to_ctrl_surf(event);
+                self.send_to_ctrl_surf(PlaybackStatus(status));
                 self.must_repaint = true;
             }
-            NewApp(_) => {
-                log::trace!("MPRIS Player: {event:?}");
+            Event::PlayerSpawned(name) => {
+                log::debug!("MPRIS Player: PlayerSpawned {name:?}");
+                {
+                    let mut player_panel = self.player_panel.lock().unwrap();
+                    player_panel.reset();
+                    player_panel.update_players(&self.players);
+                }
                 let is_connected = self
                     .ctrl_surf
                     .as_ref()
@@ -477,12 +479,33 @@ impl<'a> Controller<'a> {
                 if !is_connected {
                     self.players.send_all_data()?;
                 } else {
-                    self.send_to_ctrl_surf(event);
+                    self.send_to_ctrl_surf(NewApp(name));
                 }
+                self.players.unmute_system();
+                self.must_repaint = true;
             }
-            _ => {
-                log::debug!("MPRIS Player: {event:?}");
-                self.send_to_ctrl_surf(event);
+            Event::Caps(caps) => {
+                log::debug!("MPRIS Player: Caps");
+                self.player_panel.lock().unwrap().set_caps(caps);
+                self.must_repaint = true;
+            }
+            Event::Mixer(Volume(vol)) => {
+                log::debug!("MPRIS Player: Volume {vol:?}");
+                self.player_panel.lock().unwrap().set_volume(vol);
+                self.send_to_ctrl_surf(Volume(vol));
+                self.must_repaint = true;
+            }
+            Event::Mixer(Mute) => {
+                log::debug!("MPRIS Player: Mute");
+                self.player_panel.lock().unwrap().set_muted(true);
+                self.send_to_ctrl_surf(Mute);
+                self.must_repaint = true;
+            }
+            Event::Mixer(Unmute) => {
+                log::debug!("MPRIS Player: Unmute");
+                self.player_panel.lock().unwrap().set_muted(false);
+                self.send_to_ctrl_surf(Unmute);
+                self.must_repaint = true;
             }
         }
 
@@ -505,7 +528,7 @@ impl<'a> Controller<'a> {
     fn run_loop(
         mut self,
         req_rx: channel::Receiver<app::Request>,
-        evt_rx: channel::Receiver<AppEvent>,
+        player_rx: channel::Receiver<mpris::Event>,
         midi_rx: channel::Receiver<midi::Msg>,
         delayed_evt_rx: channel::Receiver<DelayedEvent>,
     ) {
@@ -524,7 +547,7 @@ impl<'a> Controller<'a> {
                         }
                     }
                 }
-                recv(evt_rx) -> pevent => {
+                recv(player_rx) -> pevent => {
                     match pevent {
                         Ok(pevent) => match self.handle_mpris_event(pevent) {
                             Ok(()) => (),

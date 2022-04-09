@@ -44,6 +44,7 @@ impl From<Transport> for AppEvent {
 pub enum Mixer {
     Volume(f64),
     Mute,
+    Unmute,
 }
 
 impl From<Mixer> for CtrlSurfEvent {

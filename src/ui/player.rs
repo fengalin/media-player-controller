@@ -14,6 +14,8 @@ pub enum Response {
     Use(Arc<str>),
     CheckingList,
     Position(Duration),
+    Mute,
+    UnMute,
     PlayPause,
     Previous,
     Next,
@@ -22,7 +24,9 @@ pub enum Response {
 pub struct PlayerPanel {
     list: Vec<Arc<str>>,
     cur: Arc<str>,
+    caps: mpris::Caps,
     is_playing: bool,
+    is_muted: bool,
     artist: Option<Arc<str>>,
     album: Option<Arc<str>>,
     title: Option<Arc<str>>,
@@ -40,7 +44,9 @@ impl PlayerPanel {
         Self {
             list: Vec::new(),
             cur: NO_PLAYER.clone(),
+            caps: mpris::Caps::empty(),
             is_playing: false,
+            is_muted: false,
             artist: None,
             album: None,
             title: None,
@@ -94,6 +100,8 @@ impl PlayerPanel {
             .frame(no_stroke.margin(margin))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
+                    use crate::mpris::Caps;
+
                     let mut margin = ui.spacing().window_margin;
                     margin.left = 0.0;
                     margin.right = 0.0;
@@ -109,20 +117,48 @@ impl PlayerPanel {
                                     self.duration_str.as_ref().map_or("--:--", String::as_str),
                                 ));
 
-                                if ui.button("⏮").clicked() {
-                                    resp = Some(Previous);
-                                }
-                                let play_pause_btn = if self.is_playing {
-                                    ui.button("⏸")
-                                } else {
-                                    ui.button("▶")
-                                };
-                                if play_pause_btn.clicked() {
-                                    resp = Some(PlayPause);
-                                }
-                                if ui.button("⏭").clicked() {
-                                    resp = Some(Next);
-                                }
+                                #[cfg(feature = "pulsectl")]
+                                let can_mute = true;
+                                #[cfg(not(feature = "pulsectl"))]
+                                let can_mute = self.caps.contains(Caps::VOLUME);
+
+                                ui.add_enabled_ui(can_mute, |ui| {
+                                    let mute_btn = if self.is_muted {
+                                        ui.button("🔇")
+                                    } else {
+                                        ui.button("🔉")
+                                    };
+                                    if mute_btn.clicked() {
+                                        resp = if !self.is_muted {
+                                            Some(Mute)
+                                        } else {
+                                            Some(UnMute)
+                                        };
+                                    }
+                                });
+
+                                ui.add_enabled_ui(self.caps.contains(Caps::PREVIOUS), |ui| {
+                                    if ui.button("⏮").clicked() {
+                                        resp = Some(Previous);
+                                    }
+                                });
+
+                                ui.add_enabled_ui(self.cur != *NO_PLAYER, |ui| {
+                                    let play_pause_btn = if self.is_playing {
+                                        ui.button("⏸")
+                                    } else {
+                                        ui.button("▶")
+                                    };
+                                    if play_pause_btn.clicked() {
+                                        resp = Some(PlayPause);
+                                    }
+                                });
+
+                                ui.add_enabled_ui(self.caps.contains(Caps::NEXT), |ui| {
+                                    if ui.button("⏭").clicked() {
+                                        resp = Some(Next);
+                                    }
+                                });
                             });
                         });
 
@@ -136,15 +172,18 @@ impl PlayerPanel {
                                 // Force to one otherwise the slider is centered.
                                 dur = 1;
                             }
-                            if ui
-                                .add(egui::Slider::new(&mut pos, 0..=dur).show_value(false))
-                                .changed()
-                                && !self.is_pending_seek
-                            {
-                                self.position = Duration::from_secs(pos);
-                                self.is_pending_seek = true;
-                                resp = Some(Position(self.position));
-                            }
+
+                            ui.add_enabled_ui(self.caps.contains(Caps::SEEK), |ui| {
+                                if ui
+                                    .add(egui::Slider::new(&mut pos, 0..=dur).show_value(false))
+                                    .changed()
+                                    && !self.is_pending_seek
+                                {
+                                    self.position = Duration::from_secs(pos);
+                                    self.is_pending_seek = true;
+                                    resp = Some(Position(self.position));
+                                }
+                            });
                         });
                 });
             });
@@ -230,10 +269,15 @@ impl PlayerPanel {
 
         if let Some(cur) = players.cur() {
             self.cur = cur;
+            self.caps = mpris::Caps::empty();
         } else {
             assert!(self.list.is_empty());
             self.cur = NO_PLAYER.clone();
         }
+    }
+
+    pub fn set_caps(&mut self, caps: mpris::Caps) {
+        self.caps = caps;
     }
 
     pub fn update_track(&mut self, track: &ctrl_surf::Track) {
@@ -302,7 +346,17 @@ impl PlayerPanel {
         self.is_playing = !self.is_playing;
     }
 
-    pub fn reset_data(&mut self) {
+    pub fn set_volume(&mut self, _vol: f64) {
+        self.is_muted = false;
+    }
+
+    pub fn set_muted(&mut self, is_muted: bool) {
+        self.is_muted = is_muted;
+    }
+
+    pub fn reset(&mut self) {
+        self.is_playing = false;
+        self.is_muted = false;
         self.artist = None;
         self.title = None;
         self.position = Duration::ZERO;

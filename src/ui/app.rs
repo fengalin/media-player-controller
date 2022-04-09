@@ -36,7 +36,14 @@ pub enum Request {
     Shutdown,
     HaveFrame(epi::Frame),
     HaveContext(egui::Context),
+    Mixer(ctrl_surf::event::Mixer),
     Transport(ctrl_surf::event::Transport),
+}
+
+impl From<ctrl_surf::event::Mixer> for Request {
+    fn from(evt: ctrl_surf::event::Mixer) -> Self {
+        Self::Mixer(evt)
+    }
 }
 
 impl From<ctrl_surf::event::Transport> for Request {

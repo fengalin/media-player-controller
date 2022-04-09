@@ -191,10 +191,11 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 match mixer {
                     Volume(vol) => return self.app_volume(vol),
                     Mute => (),
+                    Unmute => (),
                 }
             }
             NewApp(app) => {
-                let msg_list = if app != self.app && self.state != State::PendingAppData {
+                let msg_list = if app != self.app {
                     log::debug!("New application {app}");
 
                     self.app = app;
