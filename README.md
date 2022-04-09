@@ -3,6 +3,8 @@
 `mpris-controller` is an interface to control an mpris player from a
 Universal Control Surface such as the Behringer X-Touch One.
 
+![mpris-controller UI](assets/screenshot_20220409.png "mpris-controller UI")
+
 ## Dependencies
 
 This application uses the following crates which require system level libraries:
@@ -16,7 +18,12 @@ Minimum dependencies include development libraries for:
 
 - X11 or Wayland.
 - `alsa` (`alsa-lib-devel`, `libasound2-dev`, ...)
+- `dbus` (`dbus-devel`, ` libdbus-1-dev`, ...)
 
+System level mixer control support is available using the `pulsectl`
+(default) feature, which requires:
+
+- `pulseaudio` (`pulseaudio-libs-devel`, `libpulse-dev`, ...)
 
 ## Build
 
