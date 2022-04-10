@@ -355,9 +355,11 @@ impl PlayerPanel {
     }
 
     pub fn reset(&mut self) {
+        self.caps = mpris::Caps::empty();
         self.is_playing = false;
         self.is_muted = false;
         self.artist = None;
+        self.album = None;
         self.title = None;
         self.position = Duration::ZERO;
         self.position_str = None;
