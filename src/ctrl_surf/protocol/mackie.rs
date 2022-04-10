@@ -39,6 +39,7 @@ mod button {
     pub const ON: u8 = PRESSED;
     pub const OFF: u8 = RELEASED;
 
+    pub const MUTE: u8 = 16;
     pub const PREVIOUS: u8 = 91;
     pub const NEXT: u8 = 92;
     pub const STOP: u8 = 93;
@@ -90,6 +91,7 @@ pub struct Mackie {
     last_tc: TimecodeBreakDown,
     chan: midi::Channel,
     state: State,
+    is_muted: bool,
     fader_state: FaderState,
     app: Arc<str>,
 }
@@ -101,6 +103,7 @@ impl Mackie {
             last_tc: TimecodeBreakDown::default(),
             chan: midi::Channel::default(),
             state: State::Disconnected,
+            is_muted: false,
             fader_state: FaderState::Released,
             app: NO_APP.clone(),
         }
@@ -141,9 +144,17 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 button::TAG => {
                     if let Some(id_value) = buf.get(1..=2) {
                         use button::*;
+                        use Mixer::*;
                         use Transport::*;
 
                         match id_value {
+                            [MUTE, PRESSED] => {
+                                if self.is_muted {
+                                    return Unmute.to_app().into();
+                                } else {
+                                    return Mute.to_app().into();
+                                }
+                            }
                             [PREVIOUS, PRESSED] => return Previous.to_app().into(),
                             [NEXT, PRESSED] => return Next.to_app().into(),
                             [STOP, PRESSED] => return Stop.to_app().into(),
@@ -190,8 +201,8 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
                 use event::Mixer::*;
                 match mixer {
                     Volume(vol) => return self.app_volume(vol),
-                    Mute => (),
-                    Unmute => (),
+                    Mute => return self.app_mute(),
+                    Unmute => return self.app_unmute(),
                 }
             }
             NewApp(app) => {
@@ -247,6 +258,7 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
         let mut list = Vec::new();
 
         let tag_chan = button::TAG | self.chan;
+        list.push([tag_chan, MUTE, OFF].into());
         list.push([tag_chan, PREVIOUS, OFF].into());
         list.push([tag_chan, NEXT, OFF].into());
         list.push([tag_chan, STOP, OFF].into());
@@ -260,6 +272,7 @@ impl crate::ctrl_surf::ControlSurface for Mackie {
             Connected | Playing | Stopped => Connected,
             other => other,
         };
+        self.is_muted = false;
         self.last_tc = TimecodeBreakDown::default();
         self.app = NO_APP.clone();
 
@@ -326,6 +339,20 @@ impl Mackie {
 
 /// App events.
 impl Mackie {
+    fn app_mute(&mut self) -> Vec<Msg> {
+        use button::*;
+
+        self.is_muted = true;
+        Msg::from([TAG | self.chan, MUTE, ON]).into()
+    }
+
+    fn app_unmute(&mut self) -> Vec<Msg> {
+        use button::*;
+
+        self.is_muted = false;
+        Msg::from([TAG | self.chan, MUTE, OFF]).into()
+    }
+
     fn app_play(&mut self) -> Vec<Msg> {
         use button::*;
         use State::*;

@@ -493,6 +493,14 @@ impl<'a> Controller<'a> {
                 log::debug!("MPRIS Player: Volume {vol:?}");
                 self.player_panel.lock().unwrap().set_volume(vol);
                 self.send_to_ctrl_surf(Volume(vol));
+                // From a control surface pov, setting the volume
+                // wouldn't necessarily mean unmuting, but from
+                // an Mpris player, it does. So make it clear.
+                if vol < f64::EPSILON {
+                    self.send_to_ctrl_surf(Mute);
+                } else {
+                    self.send_to_ctrl_surf(Unmute);
+                }
                 self.must_repaint = true;
             }
             Event::Mixer(Mute) => {
