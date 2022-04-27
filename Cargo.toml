@@ -1,5 +1,5 @@
 [package]
-name = "mpris-controller"
+name = "media-player-controller"
 version = "0.1.0"
 authors = ["François Laignel <fengalin@free.fr>"]
 categories = ["Multimedia"]
@@ -7,7 +7,7 @@ keywords = ["mpris", "midi", "controller"]
 description = "Control an MPRIS player from a Universal Control Surface"
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/fengalin/mpris-controller"
+repository = "https://github.com/fengalin/media-player-controller"
 edition = "2021"
 
 [dependencies]

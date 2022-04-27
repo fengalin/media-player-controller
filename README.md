@@ -1,9 +1,11 @@
-# mpris-controller ![CI](https://github.com/fengalin/mpris-controller/workflows/CI/badge.svg)
+# media-player-controller ![CI](https://github.com/fengalin/media-player-controller/workflows/CI/badge.svg)
 
-`mpris-controller` is an interface to control an mpris player from a
+`media-player-controller` is an interface to control a media player from a
 Universal Control Surface such as the Behringer X-Touch One.
 
-![mpris-controller UI](assets/screenshot_20220409.png "mpris-controller UI")
+Currently, only MRPIS players can be controlled.
+
+![media-player-controller UI](assets/screenshot_20220409.png "media-player-controller UI")
 
 ## Dependencies
 
@@ -43,7 +45,7 @@ cargo b --release
 After a successful compilation, launch the executable with:
 
 ```
-target/release/mpris-controller
+target/release/media-player-controller
 ```
 
 ## LICENSE

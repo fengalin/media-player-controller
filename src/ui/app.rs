@@ -95,13 +95,13 @@ impl App {
 
 impl epi::App for App {
     fn name(&self) -> &str {
-        "mpris-controller"
+        "media-player-controller"
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
         egui::TopBottomPanel::top("top-area").show(ctx, |ui| {
             ui.add_space(10f32);
-            ui.heading("MPRIS Controller");
+            ui.heading("Media Player Controller");
             ui.add_space(10f32);
 
             let resp = self.ctrl_surf_panel.lock().unwrap().show(ui);
