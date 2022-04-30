@@ -5,7 +5,7 @@ Universal Control Surface such as the Behringer X-Touch One.
 
 Currently, only MRPIS players can be controlled.
 
-![media-player-controller UI](assets/screenshot_20220409.png "media-player-controller UI")
+![media-player-controller UI](assets/screenshot_20220430.png "media-player-controller UI")
 
 ## Dependencies
 
