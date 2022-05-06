@@ -1,4 +1,4 @@
-use eframe::{egui, epi};
+use eframe::egui;
 use once_cell::sync::Lazy;
 use std::{sync::Arc, time::Duration};
 
@@ -36,11 +36,11 @@ pub struct PlayerPanel {
     duration_str: Option<String>,
     is_pending_seek: bool,
     texture: Option<(Arc<str>, egui::TextureHandle)>,
-    egui_ctx: Option<egui::Context>,
+    egui_ctx: egui::Context,
 }
 
 impl PlayerPanel {
-    pub fn new() -> Self {
+    pub fn new(cc: &eframe::CreationContext) -> Self {
         Self {
             list: Vec::new(),
             cur: NO_PLAYER.clone(),
@@ -56,7 +56,7 @@ impl PlayerPanel {
             duration_str: None,
             is_pending_seek: false,
             texture: None,
-            egui_ctx: None,
+            egui_ctx: cc.egui_ctx.clone(),
         }
     }
 
@@ -69,7 +69,7 @@ impl PlayerPanel {
         let mut margin = ui.spacing().window_margin;
         margin.left = 0.0;
         egui::TopBottomPanel::top("player-selection")
-            .frame(no_stroke.margin(margin))
+            .frame(no_stroke.inner_margin(margin))
             .show_inside(ui, |ui| {
                 let player_resp = egui::ComboBox::from_label("Player")
                     .selected_text(self.cur.as_ref())
@@ -97,7 +97,7 @@ impl PlayerPanel {
 
         margin.bottom = 0.0;
         egui::TopBottomPanel::bottom("player-progress-and-controls")
-            .frame(no_stroke.margin(margin))
+            .frame(no_stroke.inner_margin(margin))
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     use crate::mpris::Caps;
@@ -108,7 +108,7 @@ impl PlayerPanel {
                     margin.top = 0.0;
 
                     egui::SidePanel::right("player-position-controls")
-                        .frame(no_stroke.margin(margin))
+                        .frame(no_stroke.inner_margin(margin))
                         .show_inside(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.monospace(format!(
@@ -164,7 +164,7 @@ impl PlayerPanel {
 
                     let mut pos = self.position.as_secs();
                     egui::CentralPanel::default()
-                        .frame(no_stroke.margin(margin))
+                        .frame(no_stroke.inner_margin(margin))
                         .show_inside(ui, |ui| {
                             ui.spacing_mut().slider_width = ui.available_size().x;
                             let mut dur = self.duration.as_secs();
@@ -194,7 +194,7 @@ impl PlayerPanel {
         margin.top *= 1.5;
         margin.bottom = 0.5;
         egui::CentralPanel::default()
-            .frame(no_stroke.margin(margin))
+            .frame(no_stroke.inner_margin(margin))
             .show_inside(ui, |ui| {
                 ui.spacing_mut().item_spacing.x *= 2.0;
                 let av_size = ui.available_size();
@@ -241,7 +241,7 @@ impl PlayerPanel {
         resp
     }
 
-    pub fn setup(&mut self, storage: Option<&dyn epi::Storage>) -> Option<Response> {
+    pub fn setup(storage: Option<&dyn eframe::Storage>) -> Option<Response> {
         use Response::*;
 
         if let Some(storage) = storage {
@@ -253,7 +253,7 @@ impl PlayerPanel {
         None
     }
 
-    pub fn save(&self, storage: &mut dyn epi::Storage) {
+    pub fn save(&self, storage: &mut dyn eframe::Storage) {
         if self.cur != *NO_PLAYER {
             storage.set_string(STORAGE_PLAYER, self.cur.to_string());
         }
@@ -290,35 +290,35 @@ impl PlayerPanel {
         match track.image_url {
             Some(ref url) => {
                 if self.texture.as_ref().map_or(true, |(cur, _)| cur != url) {
-                    if let Some(ref ctx) = self.egui_ctx {
-                        let path = url.trim_start_matches("file://");
-                        let res = image::io::Reader::open(path)
-                            .map_err(|err| {
-                                log::warn!("Failed to read image: {err}");
+                    let path = url.trim_start_matches("file://");
+                    let res = image::io::Reader::open(path)
+                        .map_err(|err| {
+                            log::warn!("Failed to read image: {err}");
+                        })
+                        .and_then(|reader| {
+                            reader.decode().map_err(|err| {
+                                log::warn!("Failed to decode image: {err}");
                             })
-                            .and_then(|reader| {
-                                reader.decode().map_err(|err| {
-                                    log::warn!("Failed to decode image: {err}");
-                                })
-                            });
+                        });
 
-                        let image = match res {
-                            Ok(image) => image,
-                            Err(()) => {
-                                self.texture = None;
-                                return;
-                            }
-                        };
+                    let image = match res {
+                        Ok(image) => image,
+                        Err(()) => {
+                            self.texture = None;
+                            return;
+                        }
+                    };
 
-                        let size = [image.width() as _, image.height() as _];
-                        let image_buffer = image.to_rgba8();
-                        let pixels = image_buffer.as_flat_samples();
-                        let color_image =
-                            egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
+                    let size = [image.width() as _, image.height() as _];
+                    let image_buffer = image.to_rgba8();
+                    let pixels = image_buffer.as_flat_samples();
+                    let color_image =
+                        egui::ColorImage::from_rgba_unmultiplied(size, pixels.as_slice());
 
-                        self.texture =
-                            Some((url.clone(), ctx.load_texture("track-image", color_image)));
-                    }
+                    self.texture = Some((
+                        url.clone(),
+                        self.egui_ctx.load_texture("track-image", color_image),
+                    ));
                 }
             }
             None => self.texture = None,
@@ -367,9 +367,5 @@ impl PlayerPanel {
         self.duration_str = None;
         self.is_pending_seek = false;
         self.texture = None;
-    }
-
-    pub fn have_context(&mut self, ctx: egui::Context) {
-        self.egui_ctx = Some(ctx);
     }
 }

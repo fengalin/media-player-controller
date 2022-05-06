@@ -1,5 +1,5 @@
 use crossbeam_channel as channel;
-use eframe::{egui, epi};
+use eframe::egui;
 use std::sync::{Arc, Mutex};
 
 use super::{controller, Dispatcher};
@@ -34,8 +34,6 @@ pub enum Request {
     UsePlayer(Arc<str>),
     RefreshPlayers,
     Shutdown,
-    HaveFrame(epi::Frame),
-    HaveContext(egui::Context),
     Mixer(ctrl_surf::event::Mixer),
     Transport(ctrl_surf::event::Transport),
 }
@@ -63,13 +61,15 @@ pub struct App {
 }
 
 impl App {
-    pub fn try_new(client_name: &str) -> Result<Self, Error> {
+    pub fn new(client_name: &str, cc: &eframe::CreationContext) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::dark());
+
         let (err_tx, err_rx) = channel::unbounded();
         let (req_tx, req_rx) = channel::unbounded();
 
         let ctrl_surf_panel = Arc::new(Mutex::new(super::ControlSurfacePanel::new()));
         let ports_panel = Arc::new(Mutex::new(super::PortsPanel::new()));
-        let player_panel = Arc::new(Mutex::new(super::PlayerPanel::new()));
+        let player_panel = Arc::new(Mutex::new(super::PlayerPanel::new(cc)));
 
         let controller_thread = controller::Spawner {
             req_rx,
@@ -78,10 +78,11 @@ impl App {
             client_name: client_name.into(),
             ports_panel: ports_panel.clone(),
             player_panel: player_panel.clone(),
+            egui_ctx: cc.egui_ctx.clone(),
         }
         .spawn();
 
-        Ok(Self {
+        let mut this = Self {
             req_tx,
             err_rx,
             ports_panel,
@@ -89,16 +90,27 @@ impl App {
             player_panel,
             last_err: None,
             controller_thread: Some(controller_thread),
-        })
+        };
+
+        this.send_req(Request::RefreshPorts);
+        for evt in super::PortsPanel::setup(cc.storage) {
+            Dispatcher::<super::PortsPanel>::handle(&mut this, Some(evt));
+        }
+        if let Some(resp) = super::ControlSurfacePanel::setup(cc.storage) {
+            Dispatcher::<super::ControlSurfacePanel>::handle(&mut this, Some(resp));
+        }
+        if let Some(resp) = super::PlayerPanel::setup(cc.storage) {
+            Dispatcher::<super::PlayerPanel>::handle(&mut this, Some(resp));
+        } else {
+            this.send_req(Request::RefreshPlayers);
+        }
+
+        this
     }
 }
 
-impl epi::App for App {
-    fn name(&self) -> &str {
-        "media-player-controller"
-    }
-
-    fn update(&mut self, ctx: &egui::Context, _frame: &epi::Frame) {
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::top("top-area").show(ctx, |ui| {
             ui.add_space(10f32);
             ui.heading("Media Player Controller");
@@ -145,32 +157,7 @@ impl epi::App for App {
         });
     }
 
-    fn setup(
-        &mut self,
-        ctx: &egui::Context,
-        frame: &epi::Frame,
-        storage: Option<&dyn epi::Storage>,
-    ) {
-        ctx.set_visuals(egui::Visuals::dark());
-        self.req_tx.send(Request::HaveFrame(frame.clone())).unwrap();
-        self.req_tx.send(Request::HaveContext(ctx.clone())).unwrap();
-
-        self.player_panel.lock().unwrap().setup(storage);
-        self.send_req(Request::RefreshPlayers);
-
-        let resps = self.ports_panel.lock().unwrap().setup(storage);
-        for resp in resps {
-            Dispatcher::<super::PortsPanel>::handle(self, Some(resp));
-        }
-        self.send_req(Request::RefreshPorts);
-
-        let resp = self.ctrl_surf_panel.lock().unwrap().setup(storage);
-        if let Some(resp) = resp {
-            Dispatcher::<super::ControlSurfacePanel>::handle(self, Some(resp));
-        }
-    }
-
-    fn save(&mut self, storage: &mut dyn epi::Storage) {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
         log::info!("Saving...");
         self.ctrl_surf_panel.lock().unwrap().save(storage);
         self.ports_panel.lock().unwrap().save(storage);
@@ -178,7 +165,7 @@ impl epi::App for App {
         self.clear_last_err();
     }
 
-    fn on_exit(&mut self) {
+    fn on_exit(&mut self, _gl: &eframe::glow::Context) {
         log::info!("Exiting...");
         self.send_req(Request::ResetControlSurface);
     }

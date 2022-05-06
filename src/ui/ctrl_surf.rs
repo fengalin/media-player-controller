@@ -1,4 +1,4 @@
-use eframe::{egui, epi};
+use eframe::egui;
 use once_cell::sync::Lazy;
 use std::sync::Arc;
 
@@ -70,7 +70,7 @@ impl ControlSurfacePanel {
         .inner
     }
 
-    pub fn setup(&mut self, storage: Option<&dyn epi::Storage>) -> Option<Response> {
+    pub fn setup(storage: Option<&dyn eframe::Storage>) -> Option<Response> {
         use Response::*;
 
         if let Some(storage) = storage {
@@ -86,7 +86,7 @@ impl ControlSurfacePanel {
         None
     }
 
-    pub fn save(&self, storage: &mut dyn epi::Storage) {
+    pub fn save(&self, storage: &mut dyn eframe::Storage) {
         storage.set_string(STORAGE_CTRL_SURF, self.cur.to_string());
     }
 }

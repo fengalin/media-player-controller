@@ -269,6 +269,10 @@ impl<'a> Players<'a> {
         }
 
         if let Some(ref mut cur) = self.cur {
+            if cur.name == name {
+                return Ok(());
+            }
+
             cur.must_stop.store(true, Ordering::Release);
 
             // Unmute in case cur player muted at the system level.

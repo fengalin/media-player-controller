@@ -1,5 +1,5 @@
 use crossbeam_channel as channel;
-use eframe::epi;
+use eframe::egui;
 use std::{
     ops::ControlFlow,
     sync::{Arc, Mutex},
@@ -22,6 +22,7 @@ pub struct Spawner {
     pub client_name: Arc<str>,
     pub ports_panel: Arc<Mutex<super::PortsPanel>>,
     pub player_panel: Arc<Mutex<super::PlayerPanel>>,
+    pub egui_ctx: egui::Context,
 }
 
 impl Spawner {
@@ -34,6 +35,7 @@ impl Spawner {
                 self.client_name,
                 self.ports_panel,
                 self.player_panel,
+                self.egui_ctx,
             );
         })
     }
@@ -63,7 +65,7 @@ struct Controller<'a> {
     player_meta_retry: Option<timer::Guard>,
 
     must_repaint: bool,
-    frame: Option<epi::Frame>,
+    egui_ctx: egui::Context,
 }
 
 // Important: panels Mutexes must be released as soon as possible.
@@ -76,6 +78,7 @@ impl<'a> Controller<'a> {
         client_name: Arc<str>,
         ports_panel: Arc<Mutex<super::PortsPanel>>,
         player_panel: Arc<Mutex<super::PlayerPanel>>,
+        egui_ctx: egui::Context,
     ) -> Result<(), ()> {
         let (delayed_evt_tx, delayed_evt_rx) = channel::unbounded();
 
@@ -109,7 +112,7 @@ impl<'a> Controller<'a> {
             player_meta_retry: None,
 
             must_repaint: false,
-            frame: None,
+            egui_ctx,
         }
         .run_loop(req_rx, evt_rx, midi_rx, delayed_evt_rx);
 
@@ -159,12 +162,6 @@ impl<'a> Controller<'a> {
             UsePlayer(player_name) => self.players.set_cur(player_name)?,
             RefreshPlayers => self.refresh_players()?,
             Shutdown => return Ok(ControlFlow::Break(())),
-            HaveFrame(egui_frame) => {
-                self.frame = Some(egui_frame);
-            }
-            HaveContext(egui_ctx) => {
-                self.player_panel.lock().unwrap().have_context(egui_ctx);
-            }
             Mixer(mevt) => {
                 log::debug!("UI Player: {mevt:?}");
                 let _ = self.players.handle_event(mevt);
@@ -599,9 +596,7 @@ impl<'a> Controller<'a> {
             }
 
             if self.must_repaint {
-                if let Some(ref frame) = self.frame {
-                    frame.request_repaint();
-                }
+                self.egui_ctx.request_repaint();
                 self.must_repaint = false;
             }
         }
