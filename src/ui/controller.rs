@@ -17,7 +17,7 @@ const TRACK_META_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 pub struct Spawner {
     pub req_rx: channel::Receiver<app::Request>,
-    pub err_tx: channel::Sender<Error>,
+    pub err_tx: channel::Sender<anyhow::Error>,
     pub ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
     pub client_name: Arc<str>,
     pub ports_panel: Arc<Mutex<super::PortsPanel>>,
@@ -48,7 +48,7 @@ enum DelayedEvent {
 }
 
 struct Controller<'a> {
-    err_tx: channel::Sender<Error>,
+    err_tx: channel::Sender<anyhow::Error>,
 
     timer: timer::Timer,
     delayed_evt_tx: channel::Sender<DelayedEvent>,
@@ -73,26 +73,31 @@ struct Controller<'a> {
 impl<'a> Controller<'a> {
     fn run(
         req_rx: channel::Receiver<app::Request>,
-        err_tx: channel::Sender<Error>,
+        err_tx: channel::Sender<anyhow::Error>,
         ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
         client_name: Arc<str>,
         ports_panel: Arc<Mutex<super::PortsPanel>>,
         player_panel: Arc<Mutex<super::PlayerPanel>>,
         egui_ctx: egui::Context,
     ) -> Result<(), ()> {
+        use anyhow::Context;
+
         let (delayed_evt_tx, delayed_evt_rx) = channel::unbounded();
 
         let (midi_tx, midi_rx) = channel::unbounded();
-        let midi_ports =
-            midi::port::InOutManager::try_new(client_name, midi_tx).map_err(|err| {
-                log::error!("Error MIDI ports manager: {}", err);
-                let _ = err_tx.send(err.into());
+        let midi_ports = midi::port::InOutManager::try_new(client_name, midi_tx)
+            .context("Failed to create MIDI ports manager")
+            .map_err(|err| {
+                log::error!("{err}");
+                let _ = err_tx.send(err);
             })?;
 
-        let (players, evt_rx) = mpris::Players::try_new().map_err(|err| {
-            log::error!("Error MPRIS players manager: {}", err);
-            let _ = err_tx.send(err.into());
-        })?;
+        let (players, evt_rx) = mpris::Players::try_new()
+            .context("Failed to create MPRIS players manager")
+            .map_err(|err| {
+                log::error!("{err}");
+                let _ = err_tx.send(err);
+            })?;
 
         Self {
             err_tx,
@@ -128,13 +133,17 @@ impl<'a> Controller<'a> {
             })
     }
 
-    fn display_err(&mut self, err: Error) {
-        log::error!("{err}");
-        let _ = self.err_tx.send(err);
-        self.must_repaint = true;
+    fn display_err(&mut self, err: impl Into<anyhow::Error>) {
+        fn inner(this: &mut Controller<'_>, err: anyhow::Error) {
+            log::error!("{err}");
+            let _ = this.err_tx.send(err);
+            this.must_repaint = true;
+        }
+
+        inner(self, err.into());
     }
 
-    fn handle_request(&mut self, request: app::Request) -> Result<ControlFlow<(), ()>, Error> {
+    fn handle_request(&mut self, request: app::Request) -> anyhow::Result<ControlFlow<(), ()>> {
         use app::Request::*;
 
         match request {
@@ -182,14 +191,14 @@ impl<'a> Controller<'a> {
 
 /// MIDI stuff.
 impl<'a> Controller<'a> {
-    fn refresh_ports(&mut self) -> Result<(), Error> {
+    fn refresh_ports(&mut self) -> anyhow::Result<()> {
         self.midi_ports.refresh()?;
         self.ports_panel.lock().unwrap().update(&self.midi_ports);
 
         Ok(())
     }
 
-    fn handle_midi_msg(&mut self, msg: midi::Msg) -> Result<(), Error> {
+    fn handle_midi_msg(&mut self, msg: midi::Msg) -> anyhow::Result<()> {
         match self.ctrl_surf {
             Some(ref ctrl_surf) => {
                 let resp = ctrl_surf.lock().unwrap().msg_from_device(msg);
@@ -202,7 +211,7 @@ impl<'a> Controller<'a> {
 
 /// Control Surface stuff.
 impl<'a> Controller<'a> {
-    fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> Result<(), Error> {
+    fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> anyhow::Result<()> {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let mut ctrl_surf = ctrl_surf.lock().unwrap();
             if ctrl_surf.is_connected() {
@@ -230,7 +239,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> Result<(), Error> {
+    fn handle_ctrl_surf_resp(&mut self, resp: Vec<ctrl_surf::Msg>) -> anyhow::Result<()> {
         use ctrl_surf::Msg::*;
 
         for msg in resp {
@@ -268,7 +277,10 @@ impl<'a> Controller<'a> {
                             // FIXME re-enable UI in case we were scanning
                         }
                         Result(Err(err)) => {
-                            log::debug!("Control Surface connection: {err}");
+                            log::debug!(
+                                "Attempt to connect Control Surface {} failed: {err}",
+                                self.ctrl_surf_panel.lock().unwrap().cur
+                            );
 
                             if self.midi_ports.is_scanning() {
                                 let _ = self.scan_next();
@@ -296,7 +308,7 @@ impl<'a> Controller<'a> {
         }
     }
 
-    fn try_connect_ctrl_surf(&mut self) -> Result<(), Error> {
+    fn try_connect_ctrl_surf(&mut self) -> anyhow::Result<()> {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             if !self.midi_ports.are_connected() {
                 self.start_scan();
@@ -380,7 +392,7 @@ impl<'a> Controller<'a> {
 
 /// Mpris Player stuff.
 impl<'a> Controller<'a> {
-    fn handle_mpris_event(&mut self, event: crate::mpris::Event) -> Result<(), Error> {
+    fn handle_mpris_event(&mut self, event: crate::mpris::Event) -> anyhow::Result<()> {
         use crate::mpris::Event;
         use ctrl_surf::event::{AppEvent::*, Data::*, Mixer::*, Transport::*};
 
@@ -517,7 +529,7 @@ impl<'a> Controller<'a> {
         Ok(())
     }
 
-    fn refresh_players(&mut self) -> Result<(), Error> {
+    fn refresh_players(&mut self) -> anyhow::Result<()> {
         self.players.refresh()?;
         self.player_panel
             .lock()

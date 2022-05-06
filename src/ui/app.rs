@@ -3,7 +3,7 @@ use eframe::egui;
 use std::sync::{Arc, Mutex};
 
 use super::{controller, Dispatcher};
-use crate::{ctrl_surf, midi, mpris};
+use crate::{ctrl_surf, midi};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -15,12 +15,6 @@ pub enum Error {
 
     #[error("Uknwown Control Surface: {}", .0)]
     UnknownControlSurface(Arc<str>),
-
-    #[error("MIDI error: {}", .0)]
-    Midi(#[from] midi::Error),
-
-    #[error("MPRIS error: {}", .0)]
-    Mpris(#[from] mpris::Error),
 }
 
 pub enum Request {
@@ -52,11 +46,11 @@ impl From<ctrl_surf::event::Transport> for Request {
 
 pub struct App {
     req_tx: channel::Sender<Request>,
-    err_rx: channel::Receiver<Error>,
+    err_rx: channel::Receiver<anyhow::Error>,
     ctrl_surf_panel: Arc<Mutex<super::ControlSurfacePanel>>,
     ports_panel: Arc<Mutex<super::PortsPanel>>,
     player_panel: Arc<Mutex<super::PlayerPanel>>,
-    last_err: Option<Error>,
+    last_err: Option<anyhow::Error>,
     controller_thread: Option<std::thread::JoinHandle<()>>,
 }
 
