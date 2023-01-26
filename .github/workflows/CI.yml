@@ -4,38 +4,34 @@ on:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  min-deps:
-    name: "Minimum dependencies"
+  checks:
+    name: "checks"
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: Install deps
-      run: |
-        sudo apt update
-        sudo apt upgrade
-        sudo apt install --no-install-recommends -y libasound2-dev libdbus-1-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev
-    - name: Build with no default features
-      run: cargo test --verbose --no-default-features
 
-  default-deps:
-    name: "Default dependencies"
-    runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Install deps
-      run: |
-        sudo apt update
-        sudo apt upgrade
-        sudo apt install --no-install-recommends -y libasound2-dev libdbus-1-dev libpulse-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev
+    - uses: actions/checkout@v3
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+
     - name: fmt
-      run: cargo fmt -- --check
+      run: cargo fmt --all -- --check
+
+    - name: Install base deps
+      run: |
+        sudo apt install --no-install-recommends -y libasound2-dev libdbus-1-dev libxcb-shape0-dev libxcb-xfixes0-dev libspeechd-dev libxkbcommon-dev
+
     - name: clippy
-      run: cargo clippy --tests
+      run: cargo clippy --no-deps --all-targets -- -D warnings
+
+    - name: Build with no default features
+      run: cargo build --no-default-features
+
     - name: Build with default features
-      run: cargo build --verbose
+      run: |
+        sudo apt install libpulse-dev
+        cargo build
