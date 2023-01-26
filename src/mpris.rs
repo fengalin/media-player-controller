@@ -137,17 +137,17 @@ impl Default for Volume {
 }
 
 #[derive(Debug)]
-struct CurrentPlayer<'a> {
+struct CurrentPlayer {
     name: Arc<str>,
-    player: mpris::Player<'a>,
+    player: mpris::Player,
     must_stop: Arc<AtomicBool>,
     volume: Volume,
     caps: Caps,
 }
 
-pub struct Players<'a> {
+pub struct Players {
     list: Vec<Arc<str>>,
-    cur: Option<CurrentPlayer<'a>>,
+    cur: Option<CurrentPlayer>,
     evt_tx: channel::Sender<Event>,
     #[cfg(feature = "pulsectl")]
     volume_controller: SinkController,
@@ -155,8 +155,9 @@ pub struct Players<'a> {
     device_index: u32,
 }
 
+// FIXME is this still needed now that mpris::Player no longer uses a lifetime.
 struct CurrentPlayerView<'a> {
-    player: &'a mpris::Player<'a>,
+    player: &'a mpris::Player,
     volume: &'a mut Volume,
     caps: &'a mut Caps,
 
@@ -167,7 +168,7 @@ struct CurrentPlayerView<'a> {
     device_index: u32,
 }
 
-impl<'a> Players<'a> {
+impl Players {
     pub fn try_new() -> Result<(Self, channel::Receiver<Event>), Error> {
         #[cfg(feature = "pulsectl")]
         let (volume_controller, device_index) = {
@@ -242,10 +243,7 @@ impl<'a> Players<'a> {
         self.cur.as_ref().map(|cur| cur.name.clone())
     }
 
-    fn cur_view<'b>(&'b mut self) -> Option<CurrentPlayerView<'b>>
-    where
-        'a: 'b,
-    {
+    fn cur_view(&mut self) -> Option<CurrentPlayerView<'_>> {
         self.cur.as_mut().map(|cur| CurrentPlayerView {
             player: &cur.player,
             volume: &mut cur.volume,
@@ -302,7 +300,7 @@ impl<'a> Players<'a> {
     }
 }
 
-impl<'a> Players<'a> {
+impl Players {
     pub fn handle_event(&mut self, event: impl Into<CtrlSurfEvent>) -> Result<(), Error> {
         if let Some(mut cur_view) = self.cur_view() {
             cur_view.handle_event(event)?;
@@ -513,7 +511,7 @@ impl<'a> CurrentPlayerView<'a> {
     }
 }
 
-impl<'a> Players<'a> {
+impl Players {
     fn spawn_loops(&mut self, name: Arc<str>) -> Arc<AtomicBool> {
         let must_stop = Arc::new(AtomicBool::new(false));
 
@@ -606,7 +604,7 @@ impl<'a> Players<'a> {
     }
 }
 
-fn get_caps(player: &mpris::Player<'_>) -> Result<Caps, Error> {
+fn get_caps(player: &mpris::Player) -> Result<Caps, Error> {
     let mut caps = Caps::empty();
     if player.can_seek()? {
         caps.insert(Caps::SEEK);

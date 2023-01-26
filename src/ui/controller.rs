@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use super::app::{self, Error};
+use super::app;
 use crate::{
     ctrl_surf::{self, AppEvent},
     midi, mpris,
@@ -41,13 +41,25 @@ impl Spawner {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Couldn't connect to Control Surface: {}", .0)]
+    ControlSurfaceConnection(Arc<str>),
+
+    #[error("Control Surface not found: {}", .0)]
+    ControlSurfaceNotFound(Arc<str>),
+
+    #[error("Uknwown Control Surface: {}", .0)]
+    UnknownControlSurface(Arc<str>),
+}
+
 #[derive(Clone, Copy, Debug)]
 enum DelayedEvent {
     CtrlSurfConnectionTimeout,
     TrackMetaRetry,
 }
 
-struct Controller<'a> {
+struct Controller {
     err_tx: channel::Sender<anyhow::Error>,
 
     timer: timer::Timer,
@@ -60,7 +72,7 @@ struct Controller<'a> {
     midi_ports: midi::port::InOutManager,
     ports_panel: Arc<Mutex<super::PortsPanel>>,
 
-    players: mpris::Players<'a>,
+    players: mpris::Players,
     player_panel: Arc<Mutex<super::PlayerPanel>>,
     player_meta_retry: Option<timer::Guard>,
 
@@ -70,7 +82,7 @@ struct Controller<'a> {
 
 // Important: panels Mutexes must be released as soon as possible.
 
-impl<'a> Controller<'a> {
+impl Controller {
     fn run(
         req_rx: channel::Receiver<app::Request>,
         err_tx: channel::Sender<anyhow::Error>,
@@ -134,7 +146,7 @@ impl<'a> Controller<'a> {
     }
 
     fn display_err(&mut self, err: impl Into<anyhow::Error>) {
-        fn inner(this: &mut Controller<'_>, err: anyhow::Error) {
+        fn inner(this: &mut Controller, err: anyhow::Error) {
             log::error!("{err}");
             let _ = this.err_tx.send(err);
             this.must_repaint = true;
@@ -190,7 +202,7 @@ impl<'a> Controller<'a> {
 }
 
 /// MIDI stuff.
-impl<'a> Controller<'a> {
+impl Controller {
     fn refresh_ports(&mut self) -> anyhow::Result<()> {
         self.midi_ports.refresh()?;
         self.ports_panel.lock().unwrap().update(&self.midi_ports);
@@ -210,7 +222,7 @@ impl<'a> Controller<'a> {
 }
 
 /// Control Surface stuff.
-impl<'a> Controller<'a> {
+impl Controller {
     fn use_ctrl_surf(&mut self, ctrl_surf_name: Arc<str>) -> anyhow::Result<()> {
         if let Some(ref ctrl_surf) = self.ctrl_surf {
             let mut ctrl_surf = ctrl_surf.lock().unwrap();
@@ -391,7 +403,7 @@ impl<'a> Controller<'a> {
 }
 
 /// Mpris Player stuff.
-impl<'a> Controller<'a> {
+impl Controller {
     fn handle_mpris_event(&mut self, event: crate::mpris::Event) -> anyhow::Result<()> {
         use crate::mpris::Event;
         use ctrl_surf::event::{AppEvent::*, Data::*, Mixer::*, Transport::*};
@@ -541,7 +553,7 @@ impl<'a> Controller<'a> {
 }
 
 /// Controller loop.
-impl<'a> Controller<'a> {
+impl Controller {
     fn run_loop(
         mut self,
         req_rx: channel::Receiver<app::Request>,

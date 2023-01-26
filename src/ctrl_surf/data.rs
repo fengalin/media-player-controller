@@ -47,7 +47,7 @@ impl fmt::Display for TimecodeUnpadded {
             let mut buf = [b'0'; 3];
             write!(buf.as_mut_slice(), "{:03}", self.0.ms).unwrap();
             let buf_str = std::str::from_utf8(&buf[..p]).unwrap();
-            write!(f, ".{}", buf_str)?;
+            write!(f, ".{buf_str}")?;
         }
 
         Ok(())
@@ -82,7 +82,7 @@ impl fmt::Display for Timecode {
             write!(f, "{}", f.fill())?;
         }
 
-        write!(f, "{}", buf_str)
+        write!(f, "{buf_str}")
     }
 }
 

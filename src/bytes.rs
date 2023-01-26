@@ -26,12 +26,12 @@ impl<'a> fmt::Display for Displayable<'a> {
         let mut iter = self.0.iter();
 
         match iter.next() {
-            Some(first) => write!(f, "(hex): {:02x}", first)?,
+            Some(first) => write!(f, "(hex): {first:02x}")?,
             None => return Ok(()),
         };
 
         for val in iter {
-            write!(f, ", {:02x}", val)?;
+            write!(f, ", {val:02x}")?;
         }
 
         Ok(())

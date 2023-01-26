@@ -558,7 +558,7 @@ impl From<ctrl_surf::Timecode> for TimecodeBreakDown {
     fn from(tc: ctrl_surf::Timecode) -> Self {
         use std::io::Write;
 
-        let printable = format!("{:>13.3}", tc);
+        let printable = format!("{tc:>13.3}");
         let bytes = printable.as_bytes();
 
         let mut this = Self::default();
