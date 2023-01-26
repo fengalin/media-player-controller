@@ -5,18 +5,6 @@ use std::sync::{Arc, Mutex};
 use super::{controller, Dispatcher};
 use crate::{ctrl_surf, midi};
 
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("Couldn't connect to Control Surface: {}", .0)]
-    ControlSurfaceConnection(Arc<str>),
-
-    #[error("Control Surface not found: {}", .0)]
-    ControlSurfaceNotFound(Arc<str>),
-
-    #[error("Uknwown Control Surface: {}", .0)]
-    UnknownControlSurface(Arc<str>),
-}
-
 pub enum Request {
     ConnectPort((midi::port::Direction, Arc<str>)),
     DisconnectPort(midi::port::Direction),
@@ -159,7 +147,7 @@ impl eframe::App for App {
         self.clear_last_err();
     }
 
-    fn on_exit(&mut self, _gl: &eframe::glow::Context) {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         log::info!("Exiting...");
         self.send_req(Request::ResetControlSurface);
     }

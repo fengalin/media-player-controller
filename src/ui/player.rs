@@ -64,12 +64,12 @@ impl PlayerPanel {
         use Response::*;
 
         let mut resp = None;
-        let no_stroke = egui::Frame::default().stroke(egui::Stroke::none());
 
         let mut margin = ui.spacing().window_margin;
         margin.left = 0.0;
         egui::TopBottomPanel::top("player-selection")
-            .frame(no_stroke.inner_margin(margin))
+            .frame(egui::Frame::default().inner_margin(margin))
+            .show_separator_line(false)
             .show_inside(ui, |ui| {
                 let player_resp = egui::ComboBox::from_label("Player")
                     .selected_text(self.cur.as_ref())
@@ -97,18 +97,20 @@ impl PlayerPanel {
 
         margin.bottom = 0.0;
         egui::TopBottomPanel::bottom("player-progress-and-controls")
-            .frame(no_stroke.inner_margin(margin))
+            .frame(egui::Frame::default().inner_margin(margin))
+            .show_separator_line(false)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     use crate::mpris::Caps;
 
                     let mut margin = ui.spacing().window_margin;
-                    margin.left = 0.0;
                     margin.right = 0.0;
-                    margin.top = 0.0;
+                    margin.top /= 2.0;
+                    margin.bottom /= 2.0;
 
                     egui::SidePanel::right("player-position-controls")
-                        .frame(no_stroke.inner_margin(margin))
+                        .frame(egui::Frame::default().inner_margin(margin))
+                        .show_separator_line(false)
                         .show_inside(ui, |ui| {
                             ui.horizontal(|ui| {
                                 ui.monospace(format!(
@@ -162,9 +164,14 @@ impl PlayerPanel {
                             });
                         });
 
+                    let mut margin = ui.spacing().window_margin;
+                    margin.left = 0.0;
+                    margin.top /= 2.0;
+                    margin.bottom /= 2.0;
+
                     let mut pos = self.position.as_secs();
                     egui::CentralPanel::default()
-                        .frame(no_stroke.inner_margin(margin))
+                        .frame(egui::Frame::default().inner_margin(margin))
                         .show_inside(ui, |ui| {
                             ui.spacing_mut().slider_width = ui.available_size().x;
                             let mut dur = self.duration.as_secs();
@@ -192,16 +199,16 @@ impl PlayerPanel {
         margin.left = 0.0;
         margin.right = 0.0;
         margin.top *= 1.5;
-        margin.bottom = 0.5;
+        margin.bottom = 0.0;
         egui::CentralPanel::default()
-            .frame(no_stroke.inner_margin(margin))
+            .frame(egui::Frame::default().inner_margin(margin))
             .show_inside(ui, |ui| {
-                ui.spacing_mut().item_spacing.x *= 2.0;
                 let av_size = ui.available_size();
 
                 if let Some((_, ref texture)) = self.texture {
                     egui::SidePanel::left("player-track-image")
-                        .frame(no_stroke)
+                        .frame(egui::Frame::default())
+                        .show_separator_line(false)
                         .show_inside(ui, |ui| {
                             let img_size = texture.size_vec2();
 
@@ -219,8 +226,11 @@ impl PlayerPanel {
                         });
                 }
 
+                let mut margin = ui.spacing().window_margin;
+                margin.left *= 3.0;
+                margin.top = 0.0;
                 egui::CentralPanel::default()
-                    .frame(no_stroke)
+                    .frame(egui::Frame::default().inner_margin(margin))
                     .show_inside(ui, |ui| {
                         ui.vertical(|ui| {
                             if let Some(artist) = self.artist.as_ref() {
@@ -317,7 +327,8 @@ impl PlayerPanel {
 
                     self.texture = Some((
                         url.clone(),
-                        self.egui_ctx.load_texture("track-image", color_image),
+                        self.egui_ctx
+                            .load_texture("track-image", color_image, Default::default()),
                     ));
                 }
             }
